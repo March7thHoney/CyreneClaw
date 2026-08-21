@@ -1,0 +1,8 @@
+# 本机环境相关，不入库
+tmp/
+CLAUDE.md
+AGENTS.md
+
+__pycache__/
+*.pyc
+.DS_Store
