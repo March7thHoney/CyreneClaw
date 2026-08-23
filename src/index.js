@@ -19,21 +19,13 @@ import { extractDialogue } from './format/dialogue.js';
 import { baseChatReplace } from './prompt/macros.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import net from 'node:net';
 
 const cfg = loadConfig();
 configureLogger(cfg.log);
 const log = createLogger('main');
 
 await initTokenizer(cfg.tokenizer);
-
-// 同一个 token 被两个进程连上会让角色每句话回两遍
-const conflict = execSync('lsof -nP -iTCP:18789 -sTCP:LISTEN 2>/dev/null || true', { encoding: 'utf8' }).trim();
-if (conflict) {
-    log.error('检测到旧版 openclaw 仍在运行（端口 18789），同一个 bot token 双开会导致重复回复');
-    log.error('请先执行：sh scripts/openclaw.sh stop');
-    process.exit(1);
-}
 
 const store = new ChatStore(cfg);
 const ambient = new AmbientBuffer(cfg);
@@ -227,6 +219,35 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
         client.destroy().finally(() => process.exit(0));
     });
 }
+
+// 开机时代理常晚于本服务就绪，先等它起来再登录，避免无谓的进程重启
+async function waitForProxy(proxyUrl, maxWaitMs = 180000) {
+    if (!proxyUrl) return true;
+    let host, port;
+    try { const u = new URL(proxyUrl); host = u.hostname; port = Number(u.port); } catch { return true; }
+    if (!port) return true;
+    const deadline = Date.now() + maxWaitMs;
+    let notified = false;
+    while (Date.now() < deadline) {
+        const ok = await new Promise((resolve) => {
+            const sock = net.connect({ host, port });
+            const done = (v) => { sock.destroy(); resolve(v); };
+            sock.once('connect', () => done(true));
+            sock.once('error', () => done(false));
+            sock.setTimeout(2000, () => done(false));
+        });
+        if (ok) {
+            if (notified) log.info('代理已就绪');
+            return true;
+        }
+        if (!notified) { log.warn('代理尚未就绪，等待中', { 代理: `${host}:${port}` }); notified = true; }
+        await new Promise((r) => setTimeout(r, 3000));
+    }
+    log.warn('等待代理超时，仍尝试登录');
+    return false;
+}
+
+await waitForProxy(cfg.discord.proxy);
 
 client.login(cfg.discord.token).catch((e) => {
     log.error('登录失败', { err: e?.message });
