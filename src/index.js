@@ -1,0 +1,234 @@
+// CyreneClaw 入口：把 Discord 事件接到酒馆式提示词组装与 bridge 生成上
+import { loadConfig } from './config.js';
+import { configureLogger, createLogger } from './logger.js';
+import { createClient } from './discord/client.js';
+import { scopeOf } from './discord/scope.js';
+import { decide, stripMentions } from './discord/gate.js';
+import { AmbientBuffer } from './discord/ambient.js';
+import { startTyping } from './discord/typing.js';
+import { sendText } from './discord/send.js';
+import { buildCommandData, handleClear } from './discord/commands.js';
+import { ChatStore } from './chat/store.js';
+import { SessionManager } from './chat/session.js';
+import { BridgeClient } from './llm/bridge.js';
+import { buildMessages } from './prompt/assemble.js';
+import { loadCard } from './prompt/card.js';
+import { initTokenizer } from './prompt/tokens.js';
+import { stripComments, redact } from './format/strip.js';
+import { extractDialogue } from './format/dialogue.js';
+import { baseChatReplace } from './prompt/macros.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
+
+const cfg = loadConfig();
+configureLogger(cfg.log);
+const log = createLogger('main');
+
+await initTokenizer(cfg.tokenizer);
+
+// 同一个 token 被两个进程连上会让角色每句话回两遍
+const conflict = execSync('lsof -nP -iTCP:18789 -sTCP:LISTEN 2>/dev/null || true', { encoding: 'utf8' }).trim();
+if (conflict) {
+    log.error('检测到旧版 openclaw 仍在运行（端口 18789），同一个 bot token 双开会导致重复回复');
+    log.error('请先执行：sh scripts/openclaw.sh stop');
+    process.exit(1);
+}
+
+const store = new ChatStore(cfg);
+const ambient = new AmbientBuffer(cfg);
+const bridge = new BridgeClient(cfg);
+const { client, djs } = createClient(cfg);
+
+let emptyContentStreak = 0;
+
+// 被回复的消息作为背景带入，正文里不重复
+function renderUserContent(entry) {
+    if (!entry.replyTo) return entry.content;
+    const body = entry.replyTo.body.length > 200 ? entry.replyTo.body.slice(0, 200) + '…' : entry.replyTo.body;
+    return `<reply_to speaker="${entry.replyTo.name}">${body}</reply_to>\n${entry.content}`;
+}
+
+function dumpPrompt(scope, messages, raw, dialogue) {
+    if (!cfg.log.logPrompts) return;
+    const dir = path.join(cfg.log.dir, 'prompts');
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const body = [
+        `# scope: ${scope.key}`,
+        `\n===== messages (${messages.length}) =====`,
+        JSON.stringify(messages, null, 2),
+        '\n===== 模型原文 =====', raw,
+        '\n===== 抽取后 =====', dialogue,
+    ].join('\n');
+    fs.writeFileSync(path.join(dir, `req-${stamp}.txt`), body);
+}
+
+async function handleTurn(scope, batch) {
+    const channel = batch[0].channel;
+    const card = loadCard(cfg.sillytavern.characterPath);
+    const history = store.load(scope).map((m) => ({
+        role: m.role,
+        // 送回模型前剥掉自查注释，与酒馆的 isPrompt 行为一致
+        content: m.role === 'assistant' ? stripComments(m.content) : renderUserContent(m),
+    }));
+
+    // 新频道先注入开场白，既是场景锚点也是最强的格式范例
+    if (!history.length && cfg.chat.seedFirstMes && card.first_mes) {
+        const greeting = baseChatReplace(card.first_mes, { char: card.name, user: cfg.discord.owner.displayName });
+        const entry = { id: `seed-${Date.now()}`, role: 'assistant', name: card.name, content: greeting, ts: Date.now() };
+        store.append(scope, entry);
+        history.push({ role: 'assistant', content: greeting });
+        if (cfg.chat.sendGreetingOnNewScope) {
+            const opening = extractDialogue(greeting, { joinSeparator: cfg.format.joinSeparator });
+            if (opening) await sendText(channel, opening, cfg);
+        }
+    }
+
+    // 连打的几条并成一个 user turn
+    const merged = batch.map((b) => b.content).join('\n');
+    const userEntry = {
+        id: batch[batch.length - 1].id,
+        role: 'user',
+        name: batch[0].authorName,
+        content: merged,
+        ts: Date.now(),
+        ...(batch[0].replyTo ? { replyTo: batch[0].replyTo } : {}),
+    };
+    store.append(scope, userEntry);
+    history.push({ role: 'user', content: renderUserContent(userEntry) });
+
+    const ambientBlock = scope.kind === 'guild'
+        ? ambient.render(scope.channelId, scope.label, new Set(batch.map((b) => b.id)))
+        : null;
+
+    const stopTyping = startTyping(channel, cfg.discord.typing);
+    try {
+        const { messages, stats } = buildMessages({ cfg, history, ambient: ambientBlock });
+        log.info('开始生成', { scope: scope.key, 世界书: stats.wiActivated, 历史: history.length });
+
+        const raw = await bridge.complete(messages);
+        const stripped = stripComments(raw, { dropUnclosed: cfg.format.dropUnclosedComment });
+        let dialogue = extractDialogue(stripped, { joinSeparator: cfg.format.joinSeparator });
+        const { text, hits } = redact(dialogue, cfg.format.redact);
+        dialogue = text.trim();
+        if (hits.length) log.warn('输出命中敏感信息并已过滤', { hits });
+
+        dumpPrompt(scope, messages, raw, dialogue);
+
+        if (!dialogue) {
+            // 抽不到对白就不发也不入库，这一轮当作没发生，下次从同一状态重来
+            log.warn('未抽取到对白，按配置跳过', { scope: scope.key, mode: cfg.format.onNoDialogue });
+            const dir = path.join(cfg.log.dir, 'prompts');
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, `nodialogue-${Date.now()}.txt`), raw);
+            if (cfg.format.onNoDialogue === 'raw' && stripped) await sendText(channel, stripped, cfg);
+            return;
+        }
+
+        const ids = await sendText(channel, dialogue, cfg);
+        // 存原文而非抽取结果，动作描写要留在记忆里
+        store.append(scope, { id: `gen-${Date.now()}`, role: 'assistant', name: card.name, content: raw, ts: Date.now(), sent: ids });
+        log.info('已回复', { scope: scope.key, 段数: ids.length, 抽取率: `${Math.round(dialogue.length / (raw.length || 1) * 100)}%` });
+    } catch (err) {
+        log.error('生成失败', { scope: scope.key, err: err?.message });
+        try { await sendText(channel, cfg.discord.replies.error, cfg); } catch { /* 连报错都发不出去就算了 */ }
+    } finally {
+        stopTyping();
+    }
+}
+
+const sessions = new SessionManager(cfg, handleTurn);
+
+client.once('clientReady', async (c) => {
+    log.info(`已登录：${c.user.tag}`);
+    for (const [id, g] of c.guilds.cache) log.info(`  所在服务器：${g.name} (${id})`);
+    try {
+        const data = buildCommandData(djs, cfg.discord.clearCommandName || '清空');
+        await c.application.commands.set([data]);
+        log.info(`斜杠命令已注册：/${data.name}`);
+    } catch (e) {
+        log.error('斜杠命令注册失败', { err: e?.message });
+    }
+});
+
+client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+    if (interaction.commandName !== (cfg.discord.clearCommandName || '清空')) return;
+    try {
+        await handleClear(interaction, { cfg, store, ambient, scopeOf });
+    } catch (e) {
+        log.error('清空命令失败', { err: e?.message });
+    }
+});
+
+client.on('messageCreate', async (message) => {
+    try {
+        if (message.author?.id === client.user?.id) return;
+
+        // MessageContent 是特权 intent，被关掉时所有正文都是空的
+        if (!message.content && !message.attachments?.size && !message.author?.bot) {
+            if (++emptyContentStreak === 3) log.error('连续收到空正文消息，MESSAGE CONTENT INTENT 可能未开启');
+        } else {
+            emptyContentStreak = 0;
+        }
+
+        // 先收进现场氛围，再判权限，否则角色看不到别人在聊什么
+        if (message.guildId && !message.author?.bot) {
+            ambient.record(message.channelId, {
+                id: message.id,
+                author: message.member?.displayName || message.author.username,
+                content: message.content,
+                ts: message.createdTimestamp,
+            });
+        }
+
+        let repliedToBot = false;
+        let replyTo = null;
+        if (message.reference?.messageId) {
+            try {
+                const ref = await message.fetchReference();
+                repliedToBot = ref.author?.id === client.user?.id;
+                if (ref.content) {
+                    replyTo = {
+                        name: repliedToBot ? loadCard(cfg.sillytavern.characterPath).name
+                            : (ref.member?.displayName || ref.author?.username || '某人'),
+                        body: repliedToBot ? stripComments(ref.content) : ref.content,
+                    };
+                }
+            } catch { /* 取不到被引用的消息就当没有 */ }
+        }
+
+        const verdict = decide(message, { cfg, botId: client.user?.id, repliedToBot });
+        if (verdict.act !== 'reply') return;
+
+        const content = stripMentions(message.content, client.user?.id);
+        if (!content) return;
+
+        const scope = scopeOf(message);
+        sessions.enqueue(scope, {
+            id: message.id,
+            content,
+            authorName: message.member?.displayName || message.author.username,
+            channel: message.channel,
+            replyTo,
+        });
+    } catch (err) {
+        log.error('消息处理异常', { err: err?.message });
+    }
+});
+
+client.on('shardError', (e) => log.error('分片错误', { err: e?.message }));
+client.on('shardDisconnect', (_e, id) => log.warn('分片断开', { id }));
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => {
+        log.info('收到退出信号，正在断开');
+        client.destroy().finally(() => process.exit(0));
+    });
+}
+
+client.login(cfg.discord.token).catch((e) => {
+    log.error('登录失败', { err: e?.message });
+    process.exit(1);
+});

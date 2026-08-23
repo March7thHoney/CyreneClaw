@@ -3,6 +3,14 @@ tmp/
 CLAUDE.md
 AGENTS.md
 
+# 含 token 与本机路径
+config.json
+
+# 运行时产物
+data/
+logs/
+node_modules/
+
 __pycache__/
 *.pyc
 .DS_Store

@@ -1,0 +1,22 @@
+{
+  "name": "cyreneclaw",
+  "version": "0.1.0",
+  "description": "Discord AI roleplay bot with SillyTavern-compatible prompt assembly",
+  "type": "module",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "check:esm": "! grep -rn \"from 'discord.js'\" src/ || (echo '禁止在 ESM 中直接引入 discord.js' && exit 1)"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "discord.js": "~14.27.0",
+    "ws": "^8.18.0",
+    "https-proxy-agent": "^7.0.6",
+    "undici": "^7.16.0",
+    "gpt-tokenizer": "^3.0.1",
+    "png-chunks-extract": "^1.0.0",
+    "png-chunk-text": "^1.0.0"
+  }
+}
