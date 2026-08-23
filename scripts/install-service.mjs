@@ -11,6 +11,17 @@ const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LABEL}.p
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// 优先用软链路径，避免 node 升级后 Cellar 里的具体版本目录消失导致服务起不来
+function resolveNode() {
+    const real = fs.realpathSync(process.execPath);
+    for (const cand of ['/opt/homebrew/bin/node', '/usr/local/bin/node']) {
+        try { if (fs.realpathSync(cand) === real) return cand; } catch { /* 不存在则跳过 */ }
+    }
+    return process.execPath;
+}
+
+const nodePath = resolveNode();
+
 const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -18,7 +29,7 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
   <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${esc(process.execPath)}</string>
+    <string>${esc(nodePath)}</string>
     <string>${esc(path.join(root, 'src/index.js'))}</string>
   </array>
   <key>WorkingDirectory</key><string>${esc(root)}</string>
@@ -43,6 +54,12 @@ fs.writeFileSync(plistPath, plist);
 console.log(`已写入 ${plistPath}`);
 
 const uid = process.getuid();
-try { execSync(`launchctl bootout gui/${uid}/${LABEL}`, { stdio: 'ignore' }); } catch { /* 未加载则忽略 */ }
+let wasLoaded = false;
+try { execSync(`launchctl print gui/${uid}/${LABEL}`, { stdio: 'ignore' }); wasLoaded = true; } catch { /* 未加载 */ }
+if (wasLoaded) {
+    execSync(`launchctl bootout gui/${uid}/${LABEL}`, { stdio: 'ignore' });
+    // launchd 释放 label 需要时间，立刻 bootstrap 会报 Input/output error
+    execSync('sleep 5');
+}
 execSync(`launchctl bootstrap gui/${uid} "${plistPath}"`);
 console.log('已加载。查看状态: launchctl print gui/' + uid + '/' + LABEL);
