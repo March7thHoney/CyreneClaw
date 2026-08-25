@@ -12,7 +12,7 @@ export function buildCommandData(djs, name) {
         .toJSON();
 }
 
-export async function handleClear(interaction, { cfg, store, ambient, scopeOf }) {
+export async function handleClear(interaction, { cfg, store, ambient, cadence, scopeOf }) {
     // 命令同样只认 owner，其他人一律看不到效果
     if (interaction.user.id !== cfg.discord.owner.userId) {
         await interaction.reply({ content: cfg.discord.replies.notOwner, ephemeral: true });
@@ -25,7 +25,8 @@ export async function handleClear(interaction, { cfg, store, ambient, scopeOf })
         channel: interaction.channel,
     });
     const archived = store.archive(scope);
-    if (scope.channelId) ambient.clear(scope.channelId);
+    // 清空记忆等于重新开始，节奏计数也回到 0
+    if (scope.channelId) { ambient.clear(scope.channelId); cadence.reset(scope.channelId); }
     await interaction.reply({
         content: archived ? cfg.discord.replies.cleared : cfg.discord.replies.nothingToClear,
         ephemeral: true,

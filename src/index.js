@@ -5,6 +5,7 @@ import { createClient } from './discord/client.js';
 import { scopeOf } from './discord/scope.js';
 import { decide, stripMentions } from './discord/gate.js';
 import { AmbientBuffer } from './discord/ambient.js';
+import { Cadence } from './discord/cadence.js';
 import { startTyping } from './discord/typing.js';
 import { sendText } from './discord/send.js';
 import { buildCommandData, handleClear } from './discord/commands.js';
@@ -30,6 +31,7 @@ await initTokenizer(cfg.tokenizer);
 
 const store = new ChatStore(cfg);
 const ambient = new AmbientBuffer(cfg);
+const cadence = new Cadence(cfg);
 const bridge = new BridgeClient(cfg);
 const { client, djs } = createClient(cfg);
 const voice = new VoiceMessenger({ cfg, client, djs });
@@ -153,7 +155,7 @@ client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     if (interaction.commandName !== (cfg.discord.clearCommandName || '清空')) return;
     try {
-        await handleClear(interaction, { cfg, store, ambient, scopeOf });
+        await handleClear(interaction, { cfg, store, ambient, cadence, scopeOf });
     } catch (e) {
         log.error('清空命令失败', { err: e?.message });
     }
@@ -174,7 +176,10 @@ client.on('messageCreate', async (message) => {
         if (message.guildId && !message.author?.bot) {
             ambient.record(message.channelId, {
                 id: message.id,
-                author: message.member?.displayName || message.author.username,
+                // owner 用角色认识的那个名字，否则频道里的昵称会被当成另一个人
+                author: message.author.id === cfg.discord.owner.userId
+                    ? cfg.discord.owner.displayName
+                    : (message.member?.displayName || message.author.username),
                 content: message.content,
                 ts: message.createdTimestamp,
             });
@@ -197,9 +202,16 @@ client.on('messageCreate', async (message) => {
         }
 
         const verdict = decide(message, { cfg, botId: client.user?.id, repliedToBot });
-        if (verdict.act !== 'reply') return;
-
         const content = stripMentions(message.content, client.user?.id);
+
+        if (verdict.act === 'reply') {
+            // 正常触发的一轮把节奏清零，重新从头数
+            cadence.reset(message.channelId);
+        } else if (!verdict.cadence || !content || !cadence.bump(message.channelId, message.guildId)) {
+            // 无正文的消息本来就发不出回复，不能让它白吃一格计数
+            return;
+        }
+
         if (!content) return;
 
         const scope = scopeOf(message);

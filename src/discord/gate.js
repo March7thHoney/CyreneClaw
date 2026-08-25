@@ -36,7 +36,8 @@ export function decide(message, { cfg, botId, repliedToBot }) {
     // 回复角色自己的消息等同于提及
     if (repliedToBot) return { act: 'reply', reason: '回复了角色' };
 
-    return { act: 'ignore', reason: '未提及' };
+    // 走到这里说明只差一个提及，是否放行交给群聊节奏
+    return { act: 'ignore', reason: '未提及', cadence: true };
 }
 
 // 把 <@id> 这类提及从正文里剥掉，避免污染上下文

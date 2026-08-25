@@ -23,8 +23,9 @@ function injectAtDepth(chatMsgs, injections) {
         if (!byDepth.has(inj.depth)) byDepth.set(inj.depth, []);
         byDepth.get(inj.depth).push(inj);
     }
+    // 已插入条数跨深度累加，否则深的那层会挤进浅层中间（对齐酒馆的 totalInsertedMessages）
+    let inserted = 0;
     for (const [depth, list] of [...byDepth.entries()].sort((a, b) => a[0] - b[0])) {
-        let inserted = 0;
         for (const inj of list) {
             const at = Math.min(depth + inserted, reversed.length);
             reversed.splice(at, 0, { role: inj.role, content: inj.content });

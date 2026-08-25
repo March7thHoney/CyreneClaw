@@ -11,10 +11,10 @@ export class AmbientBuffer {
     }
 
     // 在权限判定之前无条件收集，角色才能看见现场
-    record(channelId, { author, content, ts }) {
+    record(channelId, { id, author, content, ts }) {
         if (!this.enabled || !content?.trim()) return;
         const list = this.buffers.get(channelId) ?? [];
-        list.push({ author, content: content.trim(), ts: ts ?? Date.now() });
+        list.push({ id, author, content: content.trim(), ts: ts ?? Date.now() });
         const cutoff = Date.now() - this.retentionMs;
         const kept = list.filter((m) => m.ts >= cutoff).slice(-30);
         this.buffers.set(channelId, kept);

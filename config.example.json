@@ -16,6 +16,10 @@
         "channels": null
       }
     },
+    "cadence": {
+      "enabled": true,
+      "replyEveryN": 10
+    },
     "ambient": {
       "enabled": true,
       "maxMessages": 15,

@@ -39,7 +39,9 @@ cp config.example.json config.json
 | `discord.proxy` | 出站代理，留空则直连 |
 | `discord.owner.userId` | 你的 Discord 用户 ID，只有这个人能触发机器人 |
 | `discord.owner.displayName` | 角色对你的称呼，用于 `{{user}}` |
-| `discord.guilds` | 允许的服务器，每个可单独设 `requireMention` |
+| `discord.guilds` | 允许的服务器，每个可单独设 `requireMention`、`replyEveryN` |
+| `discord.cadence.enabled` | 群聊节奏总开关，关闭时只有 @ 或回复才触发 |
+| `discord.cadence.replyEveryN` | 你在一个频道里连说多少条没被回应的话，角色强制回一次 |
 | `sillytavern.dataDir` | 酒馆的 `data/default-user` 目录 |
 | `sillytavern.characterFile` / `presetFile` / `worldBooks` | 相对该目录的资源路径 |
 | `prompt.personaDescription` | Discord 专用 persona |
@@ -78,9 +80,15 @@ bridge 也需要各自常驻，否则机器人能登录但每次回复都会失�
 |---|---|
 | 私聊 | 直接说话即可 |
 | 服务器频道 | @ 机器人，或回复它自己的消息 |
+| 服务器频道（节奏） | 你连说满 `replyEveryN` 条没被回应的话（默认 10），第 N 条强制触发 |
 | 清空当前频道记忆 | 斜杠命令 `/清空`（旧记录归档保留，不删除） |
 
 服务器频道里其他人的发言会作为现场氛围注入上下文，但机器人只回应主人。
+
+群聊节奏只统计主人本人的发言，按频道各自计数：被 @ 或被回复而正常触发时计数清零，
+`/清空` 也清零，计数只在内存里，重启归零。节奏触发的那一轮与普通一轮完全相同——
+第 N 条就是这轮的输入，前面被跳过的话和其他人的发言都已经在现场氛围里，不会重复喂给模型。
+某个服务器想用不同的阈值，在它的 `discord.guilds` 条目里加 `replyEveryN` 即可覆盖全局值。
 
 ## 输出处理
 
