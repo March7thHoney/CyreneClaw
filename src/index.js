@@ -11,6 +11,7 @@ import { buildCommandData, handleClear } from './discord/commands.js';
 import { ChatStore } from './chat/store.js';
 import { SessionManager } from './chat/session.js';
 import { BridgeClient } from './llm/bridge.js';
+import { VoiceMessenger } from './voice/index.js';
 import { buildMessages } from './prompt/assemble.js';
 import { loadCard } from './prompt/card.js';
 import { initTokenizer } from './prompt/tokens.js';
@@ -31,6 +32,7 @@ const store = new ChatStore(cfg);
 const ambient = new AmbientBuffer(cfg);
 const bridge = new BridgeClient(cfg);
 const { client, djs } = createClient(cfg);
+const voice = new VoiceMessenger({ cfg, client, djs });
 
 let emptyContentStreak = 0;
 
@@ -121,6 +123,8 @@ async function handleTurn(scope, batch) {
         const ids = await sendText(channel, dialogue, cfg);
         // 存原文而非抽取结果，动作描写要留在记忆里
         store.append(scope, { id: `gen-${Date.now()}`, role: 'assistant', name: card.name, content: raw, ts: Date.now(), sent: ids });
+        // 合成要几十秒，只投递不等待，否则同 scope 的下一条消息会被串行队列卡住
+        voice.speak({ channelId: channel.id, text: dialogue, replyToId: ids[0] ?? null, scopeKey: scope.key });
         log.info('已回复', { scope: scope.key, 段数: ids.length, 抽取率: `${Math.round(dialogue.length / (raw.length || 1) * 100)}%` });
     } catch (err) {
         log.error('生成失败', { scope: scope.key, err: err?.message });
@@ -134,6 +138,7 @@ const sessions = new SessionManager(cfg, handleTurn);
 
 client.once('clientReady', async (c) => {
     log.info(`已登录：${c.user.tag}`);
+    if (await voice.selfCheck()) voice.warmup();
     for (const [id, g] of c.guilds.cache) log.info(`  所在服务器：${g.name} (${id})`);
     try {
         const data = buildCommandData(djs, cfg.discord.clearCommandName || '清空');
@@ -213,10 +218,17 @@ client.on('messageCreate', async (message) => {
 client.on('shardError', (e) => log.error('分片错误', { err: e?.message }));
 client.on('shardDisconnect', (_e, id) => log.warn('分片断开', { id }));
 
+let shuttingDown = false;
 for (const sig of ['SIGINT', 'SIGTERM']) {
     process.on(sig, () => {
+        // 连按两次 Ctrl-C 直接硬退，不再等收尾
+        if (shuttingDown) process.exit(1);
+        shuttingDown = true;
         log.info('收到退出信号，正在断开');
-        client.destroy().finally(() => process.exit(0));
+        voice.drain(cfg.voice.shutdownWaitMs)
+            .catch(() => {})
+            .finally(() => { voice.shutdown(); return client.destroy(); })
+            .finally(() => process.exit(0));
     });
 }
 

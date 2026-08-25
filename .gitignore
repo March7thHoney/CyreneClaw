@@ -14,3 +14,6 @@ node_modules/
 __pycache__/
 *.pyc
 .DS_Store
+
+# 语音模型与运行时，带前导斜杠以免连 src/voice/ 的源码一起忽略
+/voice/

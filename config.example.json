@@ -105,6 +105,43 @@
       "extraPatterns": []
     }
   },
+  "voice": {
+    "enabled": false,
+    "endpoint": "http://127.0.0.1:9880",
+    "dir": "./voice",
+    "python": "~/miniconda3/envs/GPTSoVits/bin/python",
+    "autoStart": true,
+    "device": "cpu",
+    "model": {
+      "dir": "model/v2ProPlus/角色目录名",
+      "gpt": "GPT 权重文件名.ckpt",
+      "sovits": "SoVITS 权重文件名.pth",
+      "refAudio": "reference_audios/中文/emotions/参考音频文件名.wav",
+      "refText": "参考音频对应的文本，要和音频内容一字不差",
+      "refLang": "zh"
+    },
+    "synth": {
+      "textLanguage": "zh",
+      "topK": 15,
+      "topP": 1.0,
+      "temperature": 1.0,
+      "speed": 1.0,
+      "sampleSteps": 16,
+      "ifSr": false
+    },
+    "minChars": 2,
+    "maxChars": 240,
+    "replyTo": "none",
+    "warmupOnStart": true,
+    "keepServiceAlive": true,
+    "readyTimeoutMs": 180000,
+    "synthTimeoutMs": 180000,
+    "queueMax": 3,
+    "shutdownWaitMs": 5000,
+    "cleanupHours": 24,
+    "ffmpeg": "",
+    "ffprobe": ""
+  },
   "tokenizer": "o200k",
   "log": {
     "level": "info",

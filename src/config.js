@@ -26,6 +26,64 @@ function pick(obj, dotted) {
     return dotted.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
 }
 
+const SAMPLE_STEPS = [4, 8, 16, 32, 64, 128];
+
+const VOICE_DEFAULTS = {
+    enabled: false,
+    endpoint: 'http://127.0.0.1:9880',
+    dir: './voice',
+    python: '~/miniconda3/envs/GPTSoVits/bin/python',
+    autoStart: true,
+    device: 'cpu',
+    minChars: 2,
+    maxChars: 240,
+    replyTo: 'none',
+    warmupOnStart: true,
+    keepServiceAlive: true,
+    readyTimeoutMs: 180000,
+    synthTimeoutMs: 180000,
+    queueMax: 3,
+    shutdownWaitMs: 5000,
+    cleanupHours: 24,
+    ffmpeg: '',
+    ffprobe: '',
+};
+
+const SYNTH_DEFAULTS = { textLanguage: 'zh', topK: 15, topP: 1.0, temperature: 1.0, speed: 1.0, sampleSteps: 16, ifSr: false };
+
+// 语音是可选增强，缺资源只降级不退出，绝不能让它挡住机器人登录
+function normalizeVoice(cfg) {
+    const v = { ...VOICE_DEFAULTS, ...(cfg.voice || {}) };
+    cfg.voice = v;
+    if (!v.enabled) return;
+    v.synth = { ...SYNTH_DEFAULTS, ...(v.synth || {}) };
+    if (!SAMPLE_STEPS.includes(v.synth.sampleSteps)) {
+        console.warn(`voice.synth.sampleSteps 只能是 ${SAMPLE_STEPS.join('/')}，已改用 16`);
+        v.synth.sampleSteps = 16;
+    }
+    v.dir = expand(v.dir);
+    v.python = expand(v.python);
+    v.runtimeDir = path.join(v.dir, 'runtime', 'GPT-SoVITS');
+    v.runtimeStateDir = path.join(v.dir, 'runtime');
+    v.generatedDir = path.join(v.dir, 'generated');
+    v.logDir = path.join(v.dir, 'logs');
+    v.pidFile = path.join(v.dir, 'runtime', 'gpt-sovits-api.pid');
+    const m = { ...(v.model || {}) };
+    v.model = m;
+    const md = path.join(v.dir, m.dir || '');
+    m.gptPath = path.join(md, m.gpt || '');
+    m.sovitsPath = path.join(md, m.sovits || '');
+    m.refPath = path.join(md, m.refAudio || '');
+    try {
+        const u = new URL(v.endpoint);
+        v.host = u.hostname;
+        v.port = Number(u.port) || 9880;
+    } catch {
+        console.warn(`voice.endpoint 不是合法 URL，已关闭语音：${v.endpoint}`);
+        v.enabled = false;
+    }
+}
+
 export function loadConfig(file) {
     const configPath = file ? expand(file) : path.join(ROOT, 'config.json');
     if (!fs.existsSync(configPath)) {
@@ -70,6 +128,8 @@ export function loadConfig(file) {
             process.exit(1);
         }
     }
+
+    normalizeVoice(cfg);
 
     cfg.configPath = configPath;
     return cfg;
