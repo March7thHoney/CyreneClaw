@@ -33,6 +33,9 @@
         ]
       }
     ],
+    "reaction": {
+      "在此填写服务器 ID": "<:表情名:表情ID>"
+    },
     "ambient": {
       "enabled": true,
       "maxMessages": 15,

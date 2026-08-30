@@ -9,6 +9,7 @@ import { AmbientBuffer } from './discord/ambient.js';
 import { Cadence } from './discord/cadence.js';
 import { startTyping } from './discord/typing.js';
 import { sendText } from './discord/send.js';
+import { reactToTrigger } from './discord/reaction.js';
 import { buildCommandData, handleClear } from './discord/commands.js';
 import { Scheduler } from './discord/schedule.js';
 import { createDirectoryRefresher } from './discord/directory.js';
@@ -130,6 +131,8 @@ async function handleTurn(scope, batch) {
         store.append(scope, { id: `gen-${Date.now()}`, role: 'assistant', name: card.name, content: raw, ts: Date.now(), sent: ids });
         // 合成要几十秒，只投递不等待，否则同 scope 的下一条消息会被串行队列卡住
         voice.speak({ channelId: channel.id, text: dialogue, replyToId: ids[0] ?? null, scopeKey: scope.key });
+        // 触发这一轮的是批次里最后一条，反应加在它身上
+        await reactToTrigger(channel, batch[batch.length - 1].id, cfg);
         log.info('已回复', { scope: scope.key, 段数: ids.length, 抽取率: `${Math.round(dialogue.length / (raw.length || 1) * 100)}%` });
     } catch (err) {
         log.error('生成失败', { scope: scope.key, err: err?.message });

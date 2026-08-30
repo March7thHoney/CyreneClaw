@@ -11,6 +11,7 @@ struct ConfigView: View {
     @State private var voiceEnabled = false
     @State private var modelName = ""
     @State private var schedule = ScheduleEntry.emptySlots
+    @State private var reaction: [String: String] = [:]
     @State private var hydrated = false
     @State private var saving = false
     @State private var saved = false
@@ -21,6 +22,7 @@ struct ConfigView: View {
             || dmEnabled != c.dmEnabled || cadenceEnabled != c.cadenceEnabled
             || replyEveryN != c.replyEveryN || voiceEnabled != c.voiceEnabled
             || modelName != c.model || !ScheduleEntry.sameStored(schedule, c.schedule)
+            || reaction != c.reaction
     }
 
     var body: some View {
@@ -28,6 +30,7 @@ struct ConfigView: View {
             discordSection.fadeUp(step: 2)
             cadenceSection.fadeUp(step: 3)
             scheduleSection.fadeUp(step: 3)
+            reactionSection.fadeUp(step: 3)
             HStack(alignment: .top, spacing: 14) {
                 modelSection
                 voiceSection
@@ -112,6 +115,48 @@ struct ConfigView: View {
         }
     }
 
+    // 清单里的服务器，加上配置里有而清单里暂时没有的，后者按 ID 兜底显示
+    private var reactionTargets: [ReactionTarget] {
+        var out = model.directory.guilds.map { ReactionTarget(id: $0.id, name: $0.name, emojis: $0.emojis) }
+        let known = Set(out.map { $0.id })
+        for id in reaction.keys.filter({ !known.contains($0) }).sorted() {
+            out.append(ReactionTarget(id: id, name: id, emojis: []))
+        }
+        return out
+    }
+
+    private func reactionBinding(_ guildId: String) -> Binding<String> {
+        Binding(get: { reaction[guildId] ?? "" }, set: { next in
+            // 不反应在配置里就是这个服务器整个缺席
+            if next.isEmpty { reaction.removeValue(forKey: guildId) } else { reaction[guildId] = next }
+        })
+    }
+
+    private var reactionSection: some View {
+        section("表情反应", icon: "face.smiling") {
+            if reactionTargets.isEmpty {
+                Text("服务器清单由在线的机器人生成，启动机器人后可选。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.warn)
+            } else {
+                HStack(spacing: 10) {
+                    Text("服务器").frame(width: 200, alignment: .leading)
+                    Text("表情").frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.inkDesc)
+
+                ForEach(reactionTargets) { target in
+                    ReactionRow(target: target, token: reactionBinding(target.id), dataDir: model.config.dataDir)
+                }
+            }
+
+            Text("回复发出后，给触发这一轮的那条消息加上该服务器的表情。@ 提及与群聊节奏都算，私聊没有这一步。")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.inkDesc)
+        }
+    }
+
     private var modelSection: some View {
         section("模型", icon: "cpu") {
             field("模型") {
@@ -163,6 +208,7 @@ struct ConfigView: View {
         voiceEnabled = c.voiceEnabled
         modelName = c.model
         schedule = c.schedule
+        reaction = c.reaction
         saved = false
     }
 
@@ -189,6 +235,7 @@ struct ConfigView: View {
                         "channels": (e.channelId.isEmpty ? [] : [e.channelId]) as [String],
                     ]
                 },
+                "discord.reaction": reaction,
             ])
             saving = false
             guard model.lastError == nil else { return }
@@ -253,8 +300,6 @@ private struct ScheduleRow: View {
     @Binding var entry: ScheduleEntry
     let directory: DiscordDirectory
     let dataDir: URL?
-
-    @State private var picking = false
 
     // 配置里只存频道，清单加载好之后服务器就能反查出来
     private var guildId: String {
@@ -323,40 +368,22 @@ private struct ScheduleRow: View {
         case .text:
             TextField("中午好♪", text: $entry.text).textFieldStyle(.plain).modifier(InputBox())
         case .emoji:
-            pickerButton(label: emojiLabel, image: emojiImage) {
+            ExpressionPickButton(dataDir: dataDir, label: emojiLabel.0, picked: emojiLabel.1,
+                                 image: emojiImage, disabled: guild == nil) { dismiss in
                 EmojiPickerPanel(dataDir: dataDir, emojis: guild?.emojis ?? []) { e in
                     entry.emoji = e.token
-                    picking = false
+                    dismiss()
                 }
             }
         case .sticker:
-            pickerButton(label: stickerLabel, image: stickerImage) {
+            ExpressionPickButton(dataDir: dataDir, label: stickerLabel.0, picked: stickerLabel.1,
+                                 image: stickerImage, disabled: guild == nil) { dismiss in
                 StickerPickerPanel(dataDir: dataDir, stickers: guild?.stickers ?? []) { s in
                     entry.sticker = s.id
-                    picking = false
+                    dismiss()
                 }
             }
         }
-    }
-
-    private func pickerButton<P: View>(label: (String, Bool), image: String,
-                                       @ViewBuilder panel: @escaping () -> P) -> some View {
-        Button { picking = true } label: {
-            HStack(spacing: 6) {
-                if !image.isEmpty { ExpressionThumb(dataDir: dataDir, path: image, side: 18) }
-                Text(label.0)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(label.1 ? Theme.ink : Theme.inkDesc)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(Theme.inkMeta)
-            }
-            .modifier(InputBox())
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(guild == nil)
-        .popover(isPresented: $picking, arrowEdge: .bottom) { panel() }
     }
 
     // 第二个值表示这一格已经选好了，用来分深浅两档字色
@@ -378,5 +405,49 @@ private struct ScheduleRow: View {
 
     private var stickerImage: String {
         guild?.stickers.first { $0.id == entry.sticker }?.image ?? ""
+    }
+}
+
+// 一个服务器一行，表情只能从这个服务器里挑
+private struct ReactionTarget: Identifiable {
+    let id: String
+    let name: String
+    let emojis: [DirEmoji]
+}
+
+private struct ReactionRow: View {
+    let target: ReactionTarget
+    @Binding var token: String
+    let dataDir: URL?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(target.name)
+                .font(.system(size: 12.5))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .frame(width: 200, alignment: .leading)
+            ExpressionPickButton(dataDir: dataDir, label: label.0, picked: label.1, image: image) { dismiss in
+                EmojiPickerPanel(dataDir: dataDir, emojis: target.emojis, onClear: {
+                    token = ""
+                    dismiss()
+                }) { e in
+                    token = e.token
+                    dismiss()
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    // 第二个值表示这一格已经选好了，用来分深浅两档字色
+    private var label: (String, Bool) {
+        if let e = target.emojis.first(where: { $0.token == token }) { return (":\(e.name):", true) }
+        if !token.isEmpty { return ("已失效", false) }
+        return ("不反应", false)
+    }
+
+    private var image: String {
+        target.emojis.first { $0.token == token }?.image ?? ""
     }
 }

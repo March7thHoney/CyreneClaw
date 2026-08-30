@@ -18,6 +18,7 @@ const ALLOW = {
     'log.level': { type: 'enum', values: ['debug', 'info', 'warn', 'error'] },
     'llm.model': { type: 'string', test: (v) => /^[\w.:@/\[\]-]{1,128}$/.test(v), hint: '模型名只能含字母数字与 . : @ / - _ [ ]' },
     'discord.schedule': { type: 'array' },
+    'discord.reaction': { type: 'object' },
 };
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -55,6 +56,21 @@ function validateSchedule(list) {
     });
 }
 
+const REACTION_MAX = 20;
+
+// 空串表示这个服务器不反应，界面上清掉选择就落成空串
+function validateReaction(map) {
+    if (!map || typeof map !== 'object' || Array.isArray(map)) throw new Error('必须是对象');
+    const keys = Object.keys(map);
+    if (keys.length > REACTION_MAX) throw new Error(`最多 ${REACTION_MAX} 个服务器`);
+    for (const k of keys) {
+        if (!CHANNEL_RE.test(k)) throw new Error(`服务器 ID ${k} 不是一串 17-20 位数字`);
+        const v = map[k];
+        if (typeof v !== 'string') throw new Error(`服务器 ${k} 的表情格式不对`);
+        if (v && !EMOJI_RE.test(v)) throw new Error(`服务器 ${k}：表情要写成 <:名字:ID> 或 <a:名字:ID>`);
+    }
+}
+
 const BOOL_TRUE = new Set(['true', '1', 'yes', 'on']);
 const BOOL_FALSE = new Set(['false', '0', 'no', 'off']);
 
@@ -87,7 +103,7 @@ function setPath(obj, dotted, value) {
 function coerce(key, raw) {
     const spec = ALLOW[key];
     if (!spec) throw new Error('不是允许修改的配置项');
-    if (spec.type === 'array') throw new Error('只能通过 --json 传入');
+    if (spec.type === 'array' || spec.type === 'object') throw new Error('只能通过 --json 传入');
     if (spec.type === 'bool') {
         const s = String(raw).toLowerCase();
         if (BOOL_TRUE.has(s)) return true;
@@ -106,6 +122,7 @@ function validate(key, value) {
     const spec = ALLOW[key];
     if (!spec) throw new Error('不是允许修改的配置项');
     if (spec.type === 'array') return validateSchedule(value);
+    if (spec.type === 'object') return validateReaction(value);
     if (spec.type === 'bool' && typeof value !== 'boolean') throw new Error('必须是布尔值');
     if (spec.type === 'int' && !Number.isInteger(value)) throw new Error('必须是整数');
     if ((spec.type === 'string' || spec.type === 'enum') && typeof value !== 'string') throw new Error('必须是字符串');

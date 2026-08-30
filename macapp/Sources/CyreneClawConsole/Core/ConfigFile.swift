@@ -60,6 +60,8 @@ struct ConsoleConfig {
     var voiceEnabled = false
     var model = ""
     var schedule = ScheduleEntry.emptySlots
+    // 服务器 ID → 表情 token，缺席即不反应
+    var reaction: [String: String] = [:]
     var tokenConfigured = false
 
     // 探活与清单文件用，不开放编辑
@@ -118,6 +120,7 @@ enum ConfigStore {
         c.voiceEnabled = v["voice.enabled"]?.bool ?? false
         c.model = v["llm.model"]?.string ?? ""
         c.schedule = parseSchedule(v["discord.schedule"]?.array)
+        c.reaction = parseReaction(v["discord.reaction"]?.object)
         c.tokenConfigured = resp.tokenConfigured ?? false
         readEndpoints(root: root, into: &c)
         return c
@@ -139,6 +142,16 @@ enum ConfigStore {
         }
         while list.count < ScheduleEntry.slotCount { list.append(ScheduleEntry()) }
         return list
+    }
+
+    // 空串在配置里等同于没配，进界面前就抹平，省得处处判空
+    private static func parseReaction(_ raw: [String: JSONAny]?) -> [String: String] {
+        var out: [String: String] = [:]
+        for (guildId, value) in raw ?? [:] {
+            guard let token = value.string, !token.isEmpty else { continue }
+            out[guildId] = token
+        }
+        return out
     }
 
     // 探活地址与数据目录直接读原文件，不必经过写回脚本的白名单

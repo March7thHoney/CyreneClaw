@@ -34,9 +34,42 @@ struct ExpressionThumb: View {
     }
 }
 
+// “已选 / 未选 / 已失效”三态的选图按钮，面板要不要关由面板自己决定
+struct ExpressionPickButton<P: View>: View {
+    let dataDir: URL?
+    let label: String
+    let picked: Bool
+    let image: String
+    var disabled = false
+    @ViewBuilder let panel: (@escaping () -> Void) -> P
+
+    @State private var picking = false
+
+    var body: some View {
+        Button { picking = true } label: {
+            HStack(spacing: 6) {
+                if !image.isEmpty { ExpressionThumb(dataDir: dataDir, path: image, side: 18) }
+                Text(label)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(picked ? Theme.ink : Theme.inkDesc)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(Theme.inkMeta)
+            }
+            .modifier(InputBox())
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .popover(isPresented: $picking, arrowEdge: .bottom) { panel { picking = false } }
+    }
+}
+
 struct EmojiPickerPanel: View {
     let dataDir: URL?
     let emojis: [DirEmoji]
+    // 给了就在面板顶上多一行清掉当前选择的入口
+    var onClear: (() -> Void)?
     let onPick: (DirEmoji) -> Void
 
     @State private var query = ""
@@ -48,6 +81,17 @@ struct EmojiPickerPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let onClear {
+                Button { onClear() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "slash.circle").font(.system(size: 11)).foregroundStyle(Theme.inkMeta)
+                        Text("不反应").font(.system(size: 12.5)).foregroundStyle(Theme.inkDesc)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
             if emojis.count > 30 {
                 TextField("搜索表情", text: $query).textFieldStyle(.plain).modifier(InputBox())
             }

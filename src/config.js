@@ -120,6 +120,28 @@ function normalizeSchedule(cfg) {
     cfg.discord.schedule = kept;
 }
 
+const REACTION_MAX = 20;
+
+// 表情反应写坏一项只丢这一项，其余照常生效
+function normalizeReaction(cfg) {
+    const raw = cfg.discord.reaction;
+    const kept = {};
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        for (const [guildId, token] of Object.entries(raw)) {
+            const at = `discord.reaction 的 ${guildId}`;
+            if (Object.keys(kept).length >= REACTION_MAX) { console.warn(`${at}超出 ${REACTION_MAX} 项上限，已跳过`); continue; }
+            // 服务器 ID 与频道 ID 同形，都是 17-20 位数字
+            if (!CHANNEL_RE.test(guildId)) { console.warn(`${at}不是一串 17-20 位数字，已跳过`); continue; }
+            const t = String(token ?? '').trim();
+            // 空串是界面上的“不反应”，安静地忽略
+            if (!t) continue;
+            if (!EMOJI_RE.test(t)) { console.warn(`${at}的表情不是 <:名字:ID> 形式，已跳过：${t}`); continue; }
+            kept[guildId] = t;
+        }
+    }
+    cfg.discord.reaction = kept;
+}
+
 // 控制台开放且能就地生效的配置项。代理要重建 Discord 连接，不在其列
 const HOT_KEYS = [
     'discord.owner.userId',
@@ -159,6 +181,13 @@ export function applyHotConfig(cfg, next) {
         cfg.discord.schedule = raw;
         normalizeSchedule(cfg);
         if (JSON.stringify(cfg.discord.schedule) !== before) changed.push('discord.schedule');
+    }
+    const rawReaction = pick(next, 'discord.reaction');
+    if (rawReaction !== undefined) {
+        const before = JSON.stringify(cfg.discord.reaction);
+        cfg.discord.reaction = rawReaction;
+        normalizeReaction(cfg);
+        if (JSON.stringify(cfg.discord.reaction) !== before) changed.push('discord.reaction');
     }
     return changed;
 }
@@ -210,6 +239,7 @@ export function loadConfig(file) {
 
     normalizeVoice(cfg);
     normalizeSchedule(cfg);
+    normalizeReaction(cfg);
 
     cfg.configPath = configPath;
     return cfg;
