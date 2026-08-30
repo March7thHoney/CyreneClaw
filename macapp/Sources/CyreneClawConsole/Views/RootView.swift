@@ -1,15 +1,8 @@
 import AppKit
 import SwiftUI
 
-enum Tab: String, CaseIterable, Identifiable {
-    case services = "控制台"
-    case config = "设置"
-    var id: String { rawValue }
-}
-
 struct RootView: View {
     @StateObject private var model = ServicesModel()
-    @State private var tab = Tab.services
 
     var body: some View {
         ZStack {
@@ -20,11 +13,10 @@ struct RootView: View {
                 VStack(spacing: 0) {
                     navBar
                     ScrollView {
-                        Group {
-                            switch tab {
-                            case .services: ServicesView(model: model)
-                            case .config: ConfigView(model: model)
-                            }
+                        VStack(spacing: 14) {
+                            ServicesView(model: model)
+                            ConfigView(model: model)
+                            footer.fadeUp(step: 4)
                         }
                         .padding(.horizontal, 18)
                         .padding(.top, 16)
@@ -52,19 +44,31 @@ struct RootView: View {
                 .font(.system(size: 14.5, weight: .bold))
                 .foregroundStyle(Theme.brand)
             Spacer(minLength: 12)
-            HStack(spacing: 4) {
-                ForEach(Tab.allCases) { t in
-                    NavPill(title: t.rawValue, active: tab == t) {
-                        withAnimation(.easeOut(duration: 0.2)) { tab = t }
-                    }
-                }
-            }
-            Spacer().frame(width: 6)
         }
         .padding(.horizontal, 8)
         .frame(height: 54)
         .glassCard(radius: 16, hoverable: false)
         .padding(.horizontal, 16)
         .padding(.top, 12)
+    }
+
+    private var footer: some View {
+        HStack(spacing: 10) {
+            Text(model.root?.path ?? "未定位项目")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.inkMeta)
+                .lineLimit(1)
+                .truncationMode(.head)
+            Spacer(minLength: 8)
+            Button("在 Finder 中打开") {
+                if let root = model.root { NSWorkspace.shared.open(root) }
+            }
+            .buttonStyle(GhostButtonStyle(compact: true))
+            Button("更改…") {
+                if let url = ProjectRoot.chooseInteractively() { model.setRoot(url) }
+            }
+            .buttonStyle(GhostButtonStyle(compact: true))
+        }
+        .padding(.horizontal, 4)
     }
 }

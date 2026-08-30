@@ -16,10 +16,11 @@ final class ServicesModel: ObservableObject {
     @Published var bridgePid: Int32?
     @Published var bridgeModel: String?
     @Published var bridgeQueue: String?
-    @Published var bridgeInstalled = false
 
     @Published var voice = ServiceState.unknown
     @Published var voicePid: Int32?
+
+    @Published var modelOptions: [String] = []
 
     @Published var busy: Set<String> = []
     @Published var hint: [String: String] = [:]
@@ -28,6 +29,14 @@ final class ServicesModel: ObservableObject {
     @Published var configLoaded = false
 
     private var timer: Task<Void, Never>?
+    private var bridgeModels: [String] = []
+
+    // bridge 拉不到时的兜底，和 st-claude-cli-bridge 默认清单保持一致
+    private static let fallbackModels = [
+        "claude-opus-5", "claude-opus-5:think", "claude-opus-5[1m]",
+        "claude-sonnet-5", "claude-sonnet-5:think", "claude-fable-5",
+        "claude-haiku-4-5-20251001",
+    ]
 
     func bootstrap() {
         root = ProjectRoot.discover()
@@ -64,6 +73,7 @@ final class ServicesModel: ObservableObject {
         do {
             config = try await ConfigStore.load(root: root)
             configLoaded = true
+            applyModelOptions()
         } catch {
             lastError = error.localizedDescription
         }
@@ -86,15 +96,15 @@ final class ServicesModel: ObservableObject {
         botLogin = b.pid != nil ? lastLogin(root: root) : nil
 
         let br = await bridgeStatus
-        bridgeInstalled = br.kind != .notInstalled
-        if !busy.contains("bridge") { bridge = map(br) }
+        bridge = map(br)
         bridgePid = br.pid
         if let h = await health {
             bridgeModel = h["model"] as? String
             let running = h["running"] as? Int ?? 0
             let queued = h["queued"] as? Int ?? 0
             bridgeQueue = "\(running) / \(queued)"
-            if !busy.contains("bridge") && br.kind == .unknown { bridge = .running }
+            if br.kind == .unknown { bridge = .running }
+            if bridgeModels.isEmpty { await loadModelOptions() }
         } else {
             bridgeModel = nil
             bridgeQueue = nil
@@ -105,6 +115,21 @@ final class ServicesModel: ObservableObject {
         if !busy.contains("voice") {
             voice = config.voiceEnabled ? (alive ? .running : .stopped) : .disabled
         }
+    }
+
+    // 模型清单跟着 bridge 走，bridge 改了配置这里自动同步
+    private func loadModelOptions() async {
+        guard let j = await HealthProbe.json("\(config.bridgeOrigin)/v1/models"),
+              let data = j["data"] as? [[String: Any]] else { return }
+        bridgeModels = data.compactMap { $0["id"] as? String }
+        applyModelOptions()
+    }
+
+    // 当前值必须在列表里，否则 Picker 选不中，会被下拉默认值悄悄改掉
+    private func applyModelOptions() {
+        var list = bridgeModels.isEmpty ? Self.fallbackModels : bridgeModels
+        if !config.model.isEmpty && !list.contains(config.model) { list.insert(config.model, at: 0) }
+        modelOptions = list
     }
 
     private func map(_ s: LaunchdStatus) -> ServiceState {

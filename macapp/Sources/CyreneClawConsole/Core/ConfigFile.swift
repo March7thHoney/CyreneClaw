@@ -9,7 +9,6 @@ struct ConsoleConfig {
     var cadenceEnabled = true
     var replyEveryN = 10
     var voiceEnabled = false
-    var logLevel = "info"
     var model = ""
     var tokenConfigured = false
 
@@ -67,7 +66,6 @@ enum ConfigStore {
         c.cadenceEnabled = v["discord.cadence.enabled"]?.bool ?? true
         c.replyEveryN = v["discord.cadence.replyEveryN"]?.int ?? 10
         c.voiceEnabled = v["voice.enabled"]?.bool ?? false
-        c.logLevel = v["log.level"]?.string ?? "info"
         c.model = v["llm.model"]?.string ?? ""
         c.tokenConfigured = resp.tokenConfigured ?? false
         readEndpoints(root: root, into: &c)

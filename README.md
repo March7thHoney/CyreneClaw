@@ -75,8 +75,8 @@ node 路径优先取软链，避免版本升级后失效。
 
 ## 控制台 App
 
-`macapp/` 下是一个原生 SwiftUI 的 macOS 控制台，看三个服务的状态、启停，
-以及改 `config.json` 的常用几项。界面风格取自昔涟的官网。
+`macapp/` 下是一个原生 SwiftUI 的 macOS 控制台，单页，上半是服务状态与机器人启停，
+下半是 `config.json` 的常用几项。界面风格取自昔涟的官网。
 
 ```bash
 bash macapp/build.sh          # 构建并替换 /Applications 里的 app
@@ -86,13 +86,15 @@ bash macapp/build.sh --icon   # 顺带重新生成图标，需要 ImageMagick
 产物在 `macapp/build/`，构建完会自动装到 `/Applications`，传 `--no-install` 可跳过。
 ad-hoc 签名，本机双击即开。
 
-- **状态与启停**：机器人与 bridge 都走 launchd（`launchctl kickstart` / `kill SIGTERM`），
-  语音走 `scripts/gpt-sovits.mjs`。停止用发信号而不是 `bootout`，
-  这样「用户主动停止」不会和「服务没装」混成同一种状态。
+- **状态与启停**：只有机器人可以启停，走 launchd（`launchctl kickstart` / `kill SIGTERM`）。
+  停止用发信号而不是 `bootout`，这样「用户主动停止」不会和「服务没装」混成同一种状态。
+  bridge 是独立常驻服务、语音由 `voice.autoStart` 按需拉起，都不需要人工干预，只在机器人卡片下方报状态。
+- **模型下拉**：候选来自 bridge 的 `/v1/models`，bridge 改了清单这里自动跟上；
+  拉不到时退回内置清单，当前值始终保留在列表里。
 - **项目根目录**：不写死。依次从偏好、`com.cyreneclaw.bot.plist` 的 `WorkingDirectory`、
   app 所在位置推断，都失败才弹目录选择。
 - **配置编辑**：写回由 `scripts/config-set.mjs` 完成，只开放白名单里的 9 项，
-  token 与各类路径不开放。改完要重启机器人才生效。
+  token 与各类路径不开放。改完要重启机器人才生效。日志级别只在脚本里开放，界面上不给。
 
 ```bash
 node scripts/config-set.mjs --get              # 读当前值，token 只报是否已配置

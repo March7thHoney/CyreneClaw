@@ -19,27 +19,6 @@ extension View {
     }
 }
 
-// nav pill：激活 bg-pink-500/10 + text-pink-600，未激活 ink/70，hover 变粉
-struct NavPill: View {
-    let title: String
-    let active: Bool
-    let action: () -> Void
-    @State private var hovered = false
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: active ? .medium : .regular))
-                .foregroundStyle(active || hovered ? Theme.pink600 : Theme.inkBody)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Theme.pink.opacity(active ? 0.10 : (hovered ? 0.05 : 0))))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 }
-    }
-}
-
 // 状态徽章：胶囊底 + 圆点，运行中与过渡态带呼吸
 struct StatusBadge: View {
     let text: String

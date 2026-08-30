@@ -5,10 +5,9 @@ struct ServicesView: View {
     @ObservedObject var model: ServicesModel
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 10) {
             botCard.fadeUp(step: 0)
-            bridgeCard.fadeUp(step: 1)
-            voiceCard.fadeUp(step: 2)
+            dependencyStrip.fadeUp(step: 1)
 
             if let err = model.lastError {
                 Text(err)
@@ -17,9 +16,6 @@ struct ServicesView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
             }
-
-            Spacer(minLength: 0)
-            footer.fadeUp(step: 3)
         }
     }
 
@@ -54,74 +50,43 @@ struct ServicesView: View {
         .disabled(model.busy.contains("bot"))
     }
 
-    private var bridgeCard: some View {
-        ServiceCard(
-            icon: "cpu",
-            title: "st-claude-cli-bridge",
-            subtitle: model.bridgeModel ?? "未响应",
-            state: model.bridge,
-            metas: metas([("PID", model.bridgePid.map(String.init)),
-                          ("队列", model.bridgeQueue)]),
-            note: model.bridgeInstalled ? nil : "常驻服务未安装"
-        ) {
-            if model.bridgeInstalled {
-                if model.bridge == .running {
-                    Button("重启") { model.restartBridge() }
-                        .buttonStyle(BrandButtonStyle(compact: true))
-                    Button("停止") { model.stopBridge() }
-                        .buttonStyle(GhostButtonStyle(compact: true, danger: true))
-                } else {
-                    Button("启动") { model.startBridge() }
-                        .buttonStyle(BrandButtonStyle(compact: true))
-                }
-            }
+    // bridge 常驻自启、语音由 bot 按需拉起，都不需要手动控制，只报状态
+    private var dependencyStrip: some View {
+        HStack(spacing: 20) {
+            dependency("bridge", model.bridge, bridgeDetail)
+            dependency("语音", model.voice, shortHost(model.config.voiceEndpoint))
+            Spacer(minLength: 0)
         }
-        .disabled(model.busy.contains("bridge"))
+        .padding(.horizontal, 6)
     }
 
-    private var voiceCard: some View {
-        ServiceCard(
-            icon: "waveform",
-            title: "GPT-SoVITS 语音",
-            subtitle: model.config.voiceEndpoint,
-            state: model.voice,
-            metas: metas([("PID", model.voicePid.map(String.init))]),
-            note: nil
-        ) {
-            if !model.config.voiceEnabled {
-                Button("启用语音") { model.enableVoice() }
-                    .buttonStyle(BrandButtonStyle(compact: true))
-            } else if model.voice == .running {
-                Button("停止") { model.stopVoice() }
-                    .buttonStyle(GhostButtonStyle(compact: true, danger: true))
-            } else {
-                Button("启动") { model.startVoice() }
-                    .buttonStyle(BrandButtonStyle(compact: true))
-            }
-            if let h = model.hint["voice"] { spinner(h) }
-        }
-        .disabled(model.busy.contains("voice") && model.voice != .starting)
-        .opacity(model.config.voiceEnabled ? 1 : 0.75)
+    private var bridgeDetail: String? {
+        guard let m = model.bridgeModel else { return nil }
+        guard let q = model.bridgeQueue else { return m }
+        return "\(m) · 队列 \(q)"
     }
 
-    private var footer: some View {
-        HStack(spacing: 10) {
-            Text(model.root?.path ?? "未定位项目")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.inkMeta)
-                .lineLimit(1)
-                .truncationMode(.head)
-            Spacer(minLength: 8)
-            Button("在 Finder 中打开") {
-                if let root = model.root { NSWorkspace.shared.open(root) }
+    private func dependency(_ name: String, _ state: ServiceState, _ detail: String?) -> some View {
+        HStack(spacing: 7) {
+            Circle().fill(state.tint).frame(width: 7, height: 7)
+            Text(name)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.inkBody)
+            Text(state.title)
+                .font(.system(size: 11.5))
+                .foregroundStyle(state.tint)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.inkMeta)
+                    .lineLimit(1)
             }
-            .buttonStyle(GhostButtonStyle(compact: true))
-            Button("更改…") {
-                if let url = ProjectRoot.chooseInteractively() { model.setRoot(url) }
-            }
-            .buttonStyle(GhostButtonStyle(compact: true))
         }
-        .padding(.horizontal, 4)
+    }
+
+    private func shortHost(_ endpoint: String) -> String? {
+        guard let u = URL(string: endpoint), let host = u.host else { return nil }
+        return u.port.map { "\(host):\($0)" } ?? host
     }
 
     private func spinner(_ text: String) -> some View {

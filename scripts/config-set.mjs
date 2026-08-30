@@ -16,7 +16,7 @@ const ALLOW = {
     'discord.cadence.replyEveryN': { type: 'int', test: (v) => v >= 1 && v <= 1000, hint: '取值 1-1000' },
     'voice.enabled': { type: 'bool' },
     'log.level': { type: 'enum', values: ['debug', 'info', 'warn', 'error'] },
-    'llm.model': { type: 'string', test: (v) => /^[\w.:@/-]{1,128}$/.test(v), hint: '模型名只能含字母数字与 . : @ / - _' },
+    'llm.model': { type: 'string', test: (v) => /^[\w.:@/\[\]-]{1,128}$/.test(v), hint: '模型名只能含字母数字与 . : @ / - _ [ ]' },
 };
 
 const BOOL_TRUE = new Set(['true', '1', 'yes', 'on']);

@@ -10,7 +10,6 @@ struct ConfigView: View {
     @State private var cadenceEnabled = true
     @State private var replyEveryN = 10
     @State private var voiceEnabled = false
-    @State private var logLevel = "info"
     @State private var modelName = ""
     @State private var hydrated = false
     @State private var saving = false
@@ -21,14 +20,18 @@ struct ConfigView: View {
         return userId != c.ownerUserId || displayName != c.ownerDisplayName || proxy != c.proxy
             || dmEnabled != c.dmEnabled || cadenceEnabled != c.cadenceEnabled
             || replyEveryN != c.replyEveryN || voiceEnabled != c.voiceEnabled
-            || logLevel != c.logLevel || modelName != c.model
+            || modelName != c.model
     }
 
     var body: some View {
         VStack(spacing: 14) {
-            discordSection.fadeUp(step: 0)
-            cadenceSection.fadeUp(step: 1)
-            voiceSection.fadeUp(step: 2)
+            discordSection.fadeUp(step: 2)
+            cadenceSection.fadeUp(step: 3)
+            HStack(alignment: .top, spacing: 14) {
+                modelSection
+                voiceSection
+            }
+            .fadeUp(step: 3)
 
             if let err = model.lastError {
                 Text(err)
@@ -38,7 +41,7 @@ struct ConfigView: View {
                     .padding(.horizontal, 4)
             }
 
-            actionBar.fadeUp(step: 3)
+            actionBar.fadeUp(step: 4)
         }
         // 配置是异步读进来的，加载完成前不能拿默认值把表单填成空的
         .onAppear { hydrate() }
@@ -47,55 +50,60 @@ struct ConfigView: View {
 
     private var discordSection: some View {
         section("Discord", icon: "person.crop.circle") {
-            field("主人用户 ID") {
-                TextField("", text: $userId).textFieldStyle(.plain).modifier(InputBox())
+            duo {
+                field("主人用户 ID") {
+                    TextField("", text: $userId).textFieldStyle(.plain).modifier(InputBox())
+                }
+            } _: {
+                field("称呼") {
+                    TextField("", text: $displayName).textFieldStyle(.plain).modifier(InputBox())
+                }
             }
-            field("称呼") {
-                TextField("", text: $displayName).textFieldStyle(.plain).modifier(InputBox())
+            duo {
+                field("出站代理") {
+                    TextField("", text: $proxy).textFieldStyle(.plain).modifier(InputBox())
+                }
+            } _: {
+                toggle("私聊", $dmEnabled)
             }
-            field("出站代理") {
-                TextField("", text: $proxy).textFieldStyle(.plain).modifier(InputBox())
-            }
-            field("Bot Token") {
-                Text(model.config.tokenConfigured ? "已配置" : "未配置")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(model.config.tokenConfigured ? Theme.ok : Theme.bad)
-                Spacer()
-            }
-            toggle("私聊", $dmEnabled)
         }
     }
 
     private var cadenceSection: some View {
         section("群聊节奏", icon: "metronome") {
-            toggle("节奏", $cadenceEnabled)
-            field("阈值") {
-                Stepper(value: $replyEveryN, in: 1...1000) {
-                    Text("\(replyEveryN)")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(Theme.ink)
-                        .monospacedDigit()
+            duo {
+                toggle("节奏", $cadenceEnabled)
+            } _: {
+                field("阈值") {
+                    Stepper(value: $replyEveryN, in: 1...1000) {
+                        Text("\(replyEveryN)")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(Theme.ink)
+                            .monospacedDigit()
+                    }
+                    .disabled(!cadenceEnabled)
+                    Spacer()
                 }
-                .disabled(!cadenceEnabled)
-                Spacer()
+            }
+        }
+    }
+
+    private var modelSection: some View {
+        section("模型", icon: "cpu") {
+            field("模型") {
+                Picker("", selection: $modelName) {
+                    ForEach(model.modelOptions, id: \.self) { Text($0).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
     private var voiceSection: some View {
-        section("语音与模型", icon: "slider.horizontal.3") {
+        section("语音", icon: "waveform") {
             toggle("语音条", $voiceEnabled)
-            field("模型") {
-                TextField("", text: $modelName).textFieldStyle(.plain).modifier(InputBox())
-            }
-            field("日志级别") {
-                Picker("", selection: $logLevel) {
-                    ForEach(["debug", "info", "warn", "error"], id: \.self) { Text($0).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 260)
-            }
         }
     }
 
@@ -135,7 +143,6 @@ struct ConfigView: View {
         cadenceEnabled = c.cadenceEnabled
         replyEveryN = c.replyEveryN
         voiceEnabled = c.voiceEnabled
-        logLevel = c.logLevel
         modelName = c.model
         saved = false
     }
@@ -151,7 +158,6 @@ struct ConfigView: View {
                 "discord.cadence.enabled": cadenceEnabled,
                 "discord.cadence.replyEveryN": replyEveryN,
                 "voice.enabled": voiceEnabled,
-                "log.level": logLevel,
                 "llm.model": modelName,
             ])
             saving = false
@@ -199,6 +205,19 @@ struct ConfigView: View {
         field(label) {
             Toggle("", isOn: value).labelsHidden().toggleStyle(.switch).tint(Theme.pink)
             Spacer()
+        }
+    }
+
+    // 两列并排，窗口窄到放不下就退回单列
+    @ViewBuilder
+    private func duo<A: View, B: View>(@ViewBuilder _ a: () -> A,
+                                       @ViewBuilder _ b: () -> B) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 18) {
+                a().frame(minWidth: 290, maxWidth: .infinity)
+                b().frame(minWidth: 290, maxWidth: .infinity)
+            }
+            VStack(alignment: .leading, spacing: 10) { a(); b() }
         }
     }
 }
