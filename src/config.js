@@ -55,7 +55,7 @@ const SYNTH_DEFAULTS = { textLanguage: 'zh', topK: 15, topP: 1.0, temperature: 1
 function normalizeVoice(cfg) {
     const v = { ...VOICE_DEFAULTS, ...(cfg.voice || {}) };
     cfg.voice = v;
-    if (!v.enabled) return;
+    // 关着也要把派生路径算出来，语音是可以热打开的
     v.synth = { ...SYNTH_DEFAULTS, ...(v.synth || {}) };
     if (!SAMPLE_STEPS.includes(v.synth.sampleSteps)) {
         console.warn(`voice.synth.sampleSteps 只能是 ${SAMPLE_STEPS.join('/')}，已改用 16`);
@@ -82,6 +82,77 @@ function normalizeVoice(cfg) {
         console.warn(`voice.endpoint 不是合法 URL，已关闭语音：${v.endpoint}`);
         v.enabled = false;
     }
+}
+
+const SCHEDULE_MAX = 5;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const CHANNEL_RE = /^\d{17,20}$/;
+
+// 定时消息与语音同理：写坏一条只丢这一条，绝不能挡住机器人登录
+function normalizeSchedule(cfg) {
+    const raw = Array.isArray(cfg.discord.schedule) ? cfg.discord.schedule : [];
+    const kept = [];
+    raw.forEach((item, i) => {
+        // 关掉的槽位是界面上的占位行，本来就该安静地忽略
+        if (!item || typeof item !== 'object' || item.enabled !== true) return;
+        const at = `discord.schedule 第 ${i + 1} 条`;
+        if (kept.length >= SCHEDULE_MAX) { console.warn(`${at}超出 ${SCHEDULE_MAX} 条上限，已跳过`); return; }
+        const time = String(item.time ?? '');
+        if (!TIME_RE.test(time)) { console.warn(`${at}的时间不是 HH:MM，已跳过：${time}`); return; }
+        const text = String(item.text ?? '').trim();
+        if (!text) { console.warn(`${at}没有内容，已跳过`); return; }
+        // 同一个频道填两遍只该收到一条
+        const channels = [...new Set((Array.isArray(item.channels) ? item.channels : [])
+            .map((c) => String(c).trim())
+            .filter((c) => CHANNEL_RE.test(c)))];
+        if (!channels.length) { console.warn(`${at}没有合法的频道 ID，已跳过`); return; }
+        const [h, m] = time.split(':');
+        kept.push({ time, minutes: Number(h) * 60 + Number(m), text, channels });
+    });
+    cfg.discord.schedule = kept;
+}
+
+// 控制台开放且能就地生效的配置项。代理要重建 Discord 连接，不在其列
+const HOT_KEYS = [
+    'discord.owner.userId',
+    'discord.owner.displayName',
+    'discord.dm.enabled',
+    'discord.cadence.enabled',
+    'discord.cadence.replyEveryN',
+    'voice.enabled',
+    'log.level',
+    'llm.model',
+];
+
+function setPath(obj, dotted, value) {
+    const keys = dotted.split('.');
+    let cur = obj;
+    for (const k of keys.slice(0, -1)) {
+        if (cur[k] == null || typeof cur[k] !== 'object') cur[k] = {};
+        cur = cur[k];
+    }
+    cur[keys[keys.length - 1]] = value;
+}
+
+// 就地改而不换对象：各组件持有的是 cfg 下子对象的引用
+export function applyHotConfig(cfg, next) {
+    const changed = [];
+    for (const key of HOT_KEYS) {
+        const to = pick(next, key);
+        if (to === undefined) continue;
+        if (JSON.stringify(pick(cfg, key)) === JSON.stringify(to)) continue;
+        setPath(cfg, key, to);
+        changed.push(key);
+    }
+    // cfg 里存的是归一化结果，要先算出新的再比
+    const raw = pick(next, 'discord.schedule');
+    if (raw !== undefined) {
+        const before = JSON.stringify(cfg.discord.schedule);
+        cfg.discord.schedule = raw;
+        normalizeSchedule(cfg);
+        if (JSON.stringify(cfg.discord.schedule) !== before) changed.push('discord.schedule');
+    }
+    return changed;
 }
 
 export function loadConfig(file) {
@@ -130,6 +201,7 @@ export function loadConfig(file) {
     }
 
     normalizeVoice(cfg);
+    normalizeSchedule(cfg);
 
     cfg.configPath = configPath;
     return cfg;

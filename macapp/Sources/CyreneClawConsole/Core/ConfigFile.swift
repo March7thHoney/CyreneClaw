@@ -1,15 +1,32 @@
 import Foundation
 
+// 定时消息的一行。channels 在界面上是逗号分隔的单行文本，存盘时才拆开
+struct ScheduleEntry: Identifiable, Equatable {
+    static let slotCount = 5
+    static var emptySlots: [ScheduleEntry] { (0..<slotCount).map { _ in ScheduleEntry() } }
+
+    let id = UUID()
+    var enabled = false
+    var time = ""
+    var text = ""
+    var channels = ""
+
+    // id 每次读配置都会新生成，算进相等性的话表单会永远显示成有改动
+    static func == (a: ScheduleEntry, b: ScheduleEntry) -> Bool {
+        a.enabled == b.enabled && a.time == b.time && a.text == b.text && a.channels == b.channels
+    }
+}
+
 // config.json 里控制台关心的那几项，其余字段一律不解析
 struct ConsoleConfig {
     var ownerUserId = ""
     var ownerDisplayName = ""
-    var proxy = ""
     var dmEnabled = true
     var cadenceEnabled = true
     var replyEveryN = 10
     var voiceEnabled = false
     var model = ""
+    var schedule = ScheduleEntry.emptySlots
     var tokenConfigured = false
 
     // 探活用，不开放编辑
@@ -61,15 +78,30 @@ enum ConfigStore {
         let v = resp.values ?? [:]
         c.ownerUserId = v["discord.owner.userId"]?.string ?? ""
         c.ownerDisplayName = v["discord.owner.displayName"]?.string ?? ""
-        c.proxy = v["discord.proxy"]?.string ?? ""
         c.dmEnabled = v["discord.dm.enabled"]?.bool ?? true
         c.cadenceEnabled = v["discord.cadence.enabled"]?.bool ?? true
         c.replyEveryN = v["discord.cadence.replyEveryN"]?.int ?? 10
         c.voiceEnabled = v["voice.enabled"]?.bool ?? false
         c.model = v["llm.model"]?.string ?? ""
+        c.schedule = parseSchedule(v["discord.schedule"]?.array)
         c.tokenConfigured = resp.tokenConfigured ?? false
         readEndpoints(root: root, into: &c)
         return c
+    }
+
+    // 界面固定 5 槽，配置里不足就补空行，这样第 3 行永远是第 3 行
+    private static func parseSchedule(_ raw: [JSONAny]?) -> [ScheduleEntry] {
+        var list = (raw ?? []).prefix(ScheduleEntry.slotCount).map { item -> ScheduleEntry in
+            let o = item.object ?? [:]
+            var e = ScheduleEntry()
+            e.enabled = o["enabled"]?.bool ?? false
+            e.time = o["time"]?.string ?? ""
+            e.text = o["text"]?.string ?? ""
+            e.channels = (o["channels"]?.array ?? []).compactMap { $0.string }.joined(separator: ", ")
+            return e
+        }
+        while list.count < ScheduleEntry.slotCount { list.append(ScheduleEntry()) }
+        return list
     }
 
     // 探活地址直接读原文件，不必经过写回脚本的白名单
@@ -110,11 +142,15 @@ struct JSONAny: Decodable {
     let string: String?
     let bool: Bool?
     let int: Int?
+    let array: [JSONAny]?
+    let object: [String: JSONAny]?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         bool = try? c.decode(Bool.self)
         int = try? c.decode(Int.self)
         string = try? c.decode(String.self)
+        array = try? c.decode([JSONAny].self)
+        object = try? c.decode([String: JSONAny].self)
     }
 }

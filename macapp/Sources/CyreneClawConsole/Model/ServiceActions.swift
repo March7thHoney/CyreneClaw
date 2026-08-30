@@ -64,7 +64,6 @@ extension ServicesModel {
         guard let root else { return }
         do {
             try await ConfigStore.apply(updates, root: root)
-            configDirty = true
             lastError = nil
         } catch {
             lastError = error.localizedDescription

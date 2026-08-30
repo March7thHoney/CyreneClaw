@@ -17,7 +17,35 @@ const ALLOW = {
     'voice.enabled': { type: 'bool' },
     'log.level': { type: 'enum', values: ['debug', 'info', 'warn', 'error'] },
     'llm.model': { type: 'string', test: (v) => /^[\w.:@/\[\]-]{1,128}$/.test(v), hint: '模型名只能含字母数字与 . : @ / - _ [ ]' },
+    'discord.schedule': { type: 'array' },
 };
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const CHANNEL_RE = /^\d{17,20}$/;
+const SCHEDULE_MAX = 5;
+const SCHEDULE_KEYS = new Set(['enabled', 'time', 'text', 'channels']);
+
+// 关掉的槽位允许留空，但填了的值仍要合法，否则界面上的占位行会被写成脏数据
+function validateSchedule(list) {
+    if (!Array.isArray(list)) throw new Error('必须是数组');
+    if (list.length > SCHEDULE_MAX) throw new Error(`最多 ${SCHEDULE_MAX} 条`);
+    list.forEach((item, i) => {
+        const at = `第 ${i + 1} 条`;
+        if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`${at}的格式不对`);
+        for (const k of Object.keys(item)) if (!SCHEDULE_KEYS.has(k)) throw new Error(`${at}多了一个字段 ${k}`);
+        const { enabled, time = '', text = '', channels = [] } = item;
+        if (typeof enabled !== 'boolean') throw new Error(`${at}的开关状态不对`);
+        if (typeof time !== 'string' || typeof text !== 'string') throw new Error(`${at}的时间或内容格式不对`);
+        if (!Array.isArray(channels) || channels.some((c) => typeof c !== 'string')) throw new Error(`${at}的频道格式不对`);
+        if (time && !TIME_RE.test(time)) throw new Error(`${at}：时间请填 24 小时制的 HH:MM，例如 09:05 或 20:10`);
+        if (text.length > 1000) throw new Error(`${at}：内容最多 1000 字`);
+        for (const c of channels) if (!CHANNEL_RE.test(c)) throw new Error(`${at}：频道 ID 是一串 17-20 位数字`);
+        if (!enabled) return;
+        if (!time) throw new Error(`${at}：请填写时间`);
+        if (!text.trim()) throw new Error(`${at}：请填写内容`);
+        if (!channels.length) throw new Error(`${at}：请填写频道 ID`);
+    });
+}
 
 const BOOL_TRUE = new Set(['true', '1', 'yes', 'on']);
 const BOOL_FALSE = new Set(['false', '0', 'no', 'off']);
@@ -51,6 +79,7 @@ function setPath(obj, dotted, value) {
 function coerce(key, raw) {
     const spec = ALLOW[key];
     if (!spec) throw new Error('不是允许修改的配置项');
+    if (spec.type === 'array') throw new Error('只能通过 --json 传入');
     if (spec.type === 'bool') {
         const s = String(raw).toLowerCase();
         if (BOOL_TRUE.has(s)) return true;
@@ -68,6 +97,7 @@ function coerce(key, raw) {
 function validate(key, value) {
     const spec = ALLOW[key];
     if (!spec) throw new Error('不是允许修改的配置项');
+    if (spec.type === 'array') return validateSchedule(value);
     if (spec.type === 'bool' && typeof value !== 'boolean') throw new Error('必须是布尔值');
     if (spec.type === 'int' && !Number.isInteger(value)) throw new Error('必须是整数');
     if ((spec.type === 'string' || spec.type === 'enum') && typeof value !== 'string') throw new Error('必须是字符串');

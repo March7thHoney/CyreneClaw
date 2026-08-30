@@ -20,6 +20,16 @@
       "enabled": true,
       "replyEveryN": 10
     },
+    "schedule": [
+      {
+        "enabled": false,
+        "time": "12:00",
+        "text": "（每天这个时刻原样发出的话，用角色口吻写）",
+        "channels": [
+          "在此填写频道 ID"
+        ]
+      }
+    ],
     "ambient": {
       "enabled": true,
       "maxMessages": 15,

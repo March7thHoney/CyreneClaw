@@ -42,6 +42,7 @@ cp config.example.json config.json
 | `discord.guilds` | 允许的服务器，每个可单独设 `requireMention`、`replyEveryN` |
 | `discord.cadence.enabled` | 群聊节奏总开关，关闭后仅 @ 或回复触发 |
 | `discord.cadence.replyEveryN` | 你在一个频道里连说多少条没被回应的话，角色强制回一次 |
+| `discord.schedule` | 定时消息，最多 5 条，见下文 |
 | `sillytavern.dataDir` | 酒馆的 `data/default-user` 目录 |
 | `sillytavern.characterFile` / `presetFile` / `worldBooks` | 相对该目录的资源路径 |
 | `prompt.personaDescription` | Discord 专用 persona |
@@ -70,7 +71,7 @@ node scripts/uninstall-service.mjs   # 卸载
 
 plist 由脚本按当前环境生成。
 `RunAtLoad` 使其在登录后自动启动，异常退出会被自动拉起。
-node 路径优先取软链，避免版本升级后失效。
+node 路径优先取软链。
 
 注意：机器人依赖 bridge 生成回复，两者都要常驻才能在重启后可用。
 
@@ -87,23 +88,24 @@ bash macapp/build.sh --icon   # 顺带重新生成图标，需要 ImageMagick
 产物在 `macapp/build/`，构建完会自动装到 `/Applications`，传 `--no-install` 可跳过。
 ad-hoc 签名，本机双击即开。
 
-- **状态与启停**：只有机器人可以启停，走 launchd（`launchctl kickstart` / `kill SIGTERM`）。
-  停止用发信号而不是 `bootout`，这样「用户主动停止」不会和「服务没装」混成同一种状态。
-  bridge 是独立常驻服务、语音由 `voice.autoStart` 按需拉起，都不需要人工干预，只在机器人卡片下方报状态。
+- **状态与启停**：机器人走 launchd 启停（`launchctl kickstart` / `kill SIGTERM`）。
+  停止发 SIGTERM，保留 launchd 里的服务注册。
+  bridge 为独立常驻服务，语音由 `voice.autoStart` 按需拉起，两者在机器人卡片下方报状态。
 - **模型下拉**：候选来自 bridge 的 `/v1/models`，bridge 改了清单这里自动跟上；
   拉不到时退回内置清单，当前值始终保留在列表里。
-- **项目根目录**：不写死。依次从偏好、`com.cyreneclaw.bot.plist` 的 `WorkingDirectory`、
-  app 所在位置推断，都失败才弹目录选择。
-- **配置编辑**：写回由 `scripts/config-set.mjs` 完成，只开放白名单里的 9 项，
-  token 与各类路径不开放。改完要重启机器人才生效。日志级别只在脚本里开放，界面上不给。
+- **项目根目录**：依次从偏好、`com.cyreneclaw.bot.plist` 的 `WorkingDirectory`、
+  app 所在位置推断，全部失败时弹出目录选择。
+- **配置编辑**：写回由 `scripts/config-set.mjs` 完成，白名单覆盖 10 项，token 与各类路径为只读。
+  界面给出其中 8 项，`log.level` 与 `discord.proxy` 留给脚本。
+- **即存即生效**：机器人监听 `config.json`，白名单里 `discord.proxy` 以外的 9 项保存后立即生效。
+  `discord.proxy` 于下次启动时生效。
 
 ```bash
 node scripts/config-set.mjs --get              # 读当前值，token 只报是否已配置
 node scripts/config-set.mjs log.level=debug    # 也可以在终端直接改
 ```
 
-写回是先写临时文件再 rename，不留备份文件。JSON 保序，
-唯一的副作用是 `voice.synth` 里 `1.0` 会被写成 `1`，语义不变。
+写回先写临时文件再 rename，JSON 保序。`voice.synth` 里的 `1.0` 会被写成 `1`。
 
 ## 触发方式
 
@@ -120,6 +122,32 @@ node scripts/config-set.mjs log.level=debug    # 也可以在终端直接改
 `/清空` 也清零。计数只在内存里，重启归零。节奏触发的那一轮与普通一轮相同：
 第 N 条就是这轮的输入，之前被跳过的话和其他人的发言已经在现场氛围里。
 某个服务器想用不同的阈值，在它的 `discord.guilds` 条目里加 `replyEveryN` 即可覆盖全局值。
+
+## 定时消息
+
+每天固定时刻往指定频道发送固定文本，最多 5 条，在控制台 App 的「定时消息」里配置。
+
+```json
+"schedule": [
+  { "enabled": true, "time": "12:00", "text": "中午好♪", "channels": ["频道 ID", "另一个频道 ID"] }
+]
+```
+
+| 字段 | 说明 |
+|---|---|
+| `enabled` | 该条的开关 |
+| `time` | 24 小时制 `HH:MM`，小时补零 |
+| `text` | 原文发出的内容，上限 1000 字 |
+| `channels` | 频道 ID 数组，一条可发往多个频道 |
+
+发送路径为「按 ID 取频道 → 分段发送 → 语音条」，语音跟随 `voice.enabled`。
+会话记忆与群聊节奏计数保持原状。
+
+时刻按机器人进程的本地时间计算，launchd 的 plist 固定 `TZ=Asia/Shanghai`。
+调度器每 30 秒检查一次，与整分匹配：进程在目标分钟之内启动仍会发出，跨过整分则等次日。
+
+时间格式、频道 ID、内容为空的条目在启动时跳过并记警告，机器人照常登录。
+界面固定 5 槽，关闭的槽位作为占位保留行号。
 
 ## 输出处理
 
@@ -141,7 +169,7 @@ node scripts/config-set.mjs log.level=debug    # 也可以在终端直接改
 ## 语音
 
 台词发出后会再补一条 Discord 原生语音条（紫色波形气泡）。
-Discord 的语音条只能单独成条，所以它跟在文字后面。
+Discord 的语音条单独成条，位置在文字之后。
 
 文字可能分成几段，语音每轮只发一条，取整轮台词按 `voice.maxChars` 截断。
 

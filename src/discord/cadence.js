@@ -5,11 +5,16 @@ const log = createLogger('cadence');
 
 export class Cadence {
     constructor(cfg) {
+        this.counters = new Map();
+        this.reconfigure(cfg);
+    }
+
+    // 控制台改了开关或阈值就地生效，计数不清零
+    reconfigure(cfg) {
         const c = cfg.discord.cadence || {};
         this.guilds = cfg.discord.guilds || {};
         this.enabled = c.enabled === true;
         this.defaultN = Math.max(1, Number(c.replyEveryN) || 10);
-        this.counters = new Map();
     }
 
     // 服务器可单独覆盖阈值，缺省继承全局值

@@ -25,21 +25,46 @@ export class VoiceMessenger {
     #timeouts = 0;
     #enabled;
     #timer = null;
+    #proxy;
 
     constructor({ cfg, client, djs }) {
         this.#cfg = cfg.voice;
         this.#client = client;
         this.#djs = djs;
+        this.#proxy = cfg.discord.proxy;
         this.#enabled = Boolean(cfg.voice?.enabled);
         if (!this.#enabled) return;
-        this.#tts = new TtsEngine(cfg.voice);
-        this.#ffmpeg = resolveBinary('ffmpeg', cfg.voice.ffmpeg);
-        this.#ffprobe = resolveBinary('ffprobe', cfg.voice.ffprobe);
-        this.#uploadAgent = createUploadAgent(cfg.discord.proxy);
+        this.#build();
     }
 
     get enabled() {
         return this.#enabled;
+    }
+
+    #build() {
+        if (this.#tts) return;
+        this.#tts = new TtsEngine(this.#cfg);
+        this.#ffmpeg = resolveBinary('ffmpeg', this.#cfg.ffmpeg);
+        this.#ffprobe = resolveBinary('ffprobe', this.#cfg.ffprobe);
+        this.#uploadAgent = createUploadAgent(this.#proxy);
+    }
+
+    // 控制台拨动语音开关就地生效：关掉即刻静音，打开则补建引擎再自检预热
+    async reconfigure(cfg) {
+        const want = Boolean(cfg.voice?.enabled);
+        if (want === this.#enabled) return;
+        if (!want) {
+            this.#enabled = false;
+            this.#queue.length = 0;
+            log.info('语音已关闭');
+            return;
+        }
+        this.#enabled = true;
+        this.#build();
+        if (await this.selfCheck()) {
+            log.info('语音已开启');
+            this.warmup();
+        }
     }
 
     // 环境性缺失重试没意义，体检不过就永久关掉，让文字回复该怎样还怎样
@@ -67,8 +92,10 @@ export class VoiceMessenger {
         const removed = this.#tts.cleanupGenerated();
         if (removed) log.info('已清理过期语音', { 数量: removed });
         // 定时器不 unref 会吊住进程不让退出
-        this.#timer = setInterval(() => this.#tts.cleanupGenerated(), CLEANUP_INTERVAL_MS);
-        this.#timer.unref();
+        if (!this.#timer) {
+            this.#timer = setInterval(() => this.#tts.cleanupGenerated(), CLEANUP_INTERVAL_MS);
+            this.#timer.unref();
+        }
         return true;
     }
 

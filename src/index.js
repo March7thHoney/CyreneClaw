@@ -1,5 +1,6 @@
 // CyreneClaw 入口：把 Discord 事件接到酒馆式提示词组装与 bridge 生成上
 import { loadConfig } from './config.js';
+import { watchConfig } from './config-watch.js';
 import { configureLogger, createLogger } from './logger.js';
 import { createClient } from './discord/client.js';
 import { scopeOf } from './discord/scope.js';
@@ -9,6 +10,7 @@ import { Cadence } from './discord/cadence.js';
 import { startTyping } from './discord/typing.js';
 import { sendText } from './discord/send.js';
 import { buildCommandData, handleClear } from './discord/commands.js';
+import { Scheduler } from './discord/schedule.js';
 import { ChatStore } from './chat/store.js';
 import { SessionManager } from './chat/session.js';
 import { BridgeClient } from './llm/bridge.js';
@@ -137,10 +139,22 @@ async function handleTurn(scope, batch) {
 }
 
 const sessions = new SessionManager(cfg, handleTurn);
+const scheduler = new Scheduler({ cfg, client, voice, sessions });
+
+// 控制台开放的配置改完即生效，不必重启
+watchConfig(cfg, (changed) => {
+    if (changed.includes('log.level')) configureLogger(cfg.log);
+    if (changed.some((k) => k.startsWith('discord.cadence'))) cadence.reconfigure(cfg);
+    if (changed.includes('discord.schedule')) scheduler.reconfigure();
+    if (changed.includes('voice.enabled')) {
+        voice.reconfigure(cfg).catch((e) => log.error('语音开关切换失败', { err: e?.message }));
+    }
+});
 
 client.once('clientReady', async (c) => {
     log.info(`已登录：${c.user.tag}`);
     if (await voice.selfCheck()) voice.warmup();
+    scheduler.start();
     for (const [id, g] of c.guilds.cache) log.info(`  所在服务器：${g.name} (${id})`);
     try {
         const data = buildCommandData(djs, cfg.discord.clearCommandName || '清空');

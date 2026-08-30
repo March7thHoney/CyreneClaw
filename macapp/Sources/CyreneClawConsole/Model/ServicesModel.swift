@@ -25,7 +25,6 @@ final class ServicesModel: ObservableObject {
     @Published var busy: Set<String> = []
     @Published var hint: [String: String] = [:]
     @Published var lastError: String?
-    @Published var configDirty = false
     @Published var configLoaded = false
 
     private var timer: Task<Void, Never>?

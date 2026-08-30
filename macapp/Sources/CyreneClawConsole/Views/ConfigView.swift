@@ -5,28 +5,29 @@ struct ConfigView: View {
 
     @State private var userId = ""
     @State private var displayName = ""
-    @State private var proxy = ""
     @State private var dmEnabled = true
     @State private var cadenceEnabled = true
     @State private var replyEveryN = 10
     @State private var voiceEnabled = false
     @State private var modelName = ""
+    @State private var schedule = ScheduleEntry.emptySlots
     @State private var hydrated = false
     @State private var saving = false
     @State private var saved = false
 
     private var dirty: Bool {
         let c = model.config
-        return userId != c.ownerUserId || displayName != c.ownerDisplayName || proxy != c.proxy
+        return userId != c.ownerUserId || displayName != c.ownerDisplayName
             || dmEnabled != c.dmEnabled || cadenceEnabled != c.cadenceEnabled
             || replyEveryN != c.replyEveryN || voiceEnabled != c.voiceEnabled
-            || modelName != c.model
+            || modelName != c.model || schedule != c.schedule
     }
 
     var body: some View {
         VStack(spacing: 14) {
             discordSection.fadeUp(step: 2)
             cadenceSection.fadeUp(step: 3)
+            scheduleSection.fadeUp(step: 3)
             HStack(alignment: .top, spacing: 14) {
                 modelSection
                 voiceSection
@@ -59,13 +60,7 @@ struct ConfigView: View {
                     TextField("", text: $displayName).textFieldStyle(.plain).modifier(InputBox())
                 }
             }
-            duo {
-                field("出站代理") {
-                    TextField("", text: $proxy).textFieldStyle(.plain).modifier(InputBox())
-                }
-            } _: {
-                toggle("私聊", $dmEnabled)
-            }
+            toggle("私聊", $dmEnabled)
         }
     }
 
@@ -85,6 +80,37 @@ struct ConfigView: View {
                     Spacer()
                 }
             }
+        }
+    }
+
+    private var scheduleSection: some View {
+        section("定时消息", icon: "clock") {
+            HStack(spacing: 10) {
+                Spacer().frame(width: 30)
+                Text("时间").frame(width: 62, alignment: .leading)
+                Text("内容").frame(maxWidth: .infinity, alignment: .leading)
+                Text("频道 ID，逗号分隔").frame(width: 200, alignment: .leading)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(Theme.inkDesc)
+
+            ForEach($schedule) { $entry in
+                HStack(spacing: 10) {
+                    Toggle("", isOn: $entry.enabled)
+                        .labelsHidden().toggleStyle(.switch).tint(Theme.pink)
+                        .scaleEffect(0.75).frame(width: 30)
+                    TextField("12:00", text: $entry.time)
+                        .textFieldStyle(.plain).modifier(InputBox()).frame(width: 62)
+                    TextField("中午好♪", text: $entry.text)
+                        .textFieldStyle(.plain).modifier(InputBox())
+                    TextField("1234567890123456789", text: $entry.channels)
+                        .textFieldStyle(.plain).modifier(InputBox()).frame(width: 200)
+                }
+            }
+
+            Text("每天该时刻按原文发出，不经过模型，也不进入对话记忆。错过就跳过，不补发。")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.inkDesc)
         }
     }
 
@@ -109,19 +135,14 @@ struct ConfigView: View {
 
     private var actionBar: some View {
         HStack(spacing: 10) {
-            if saved && !dirty {
-                Text("已保存")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.ok)
-            }
+            Text(saved && !dirty ? "已保存，已生效" : "保存后即刻生效")
+                .font(.system(size: 12))
+                .foregroundStyle(saved && !dirty ? Theme.ok : Theme.inkDesc)
             Spacer()
             Button("还原") { reset() }
                 .buttonStyle(GhostButtonStyle())
                 .disabled(!dirty || saving)
-            Button("保存") { save(restart: false) }
-                .buttonStyle(GhostButtonStyle())
-                .disabled(!dirty || saving)
-            Button("保存并重启") { save(restart: true) }
+            Button("保存") { save() }
                 .buttonStyle(BrandButtonStyle())
                 .disabled(!dirty || saving)
         }
@@ -138,36 +159,43 @@ struct ConfigView: View {
         let c = model.config
         userId = c.ownerUserId
         displayName = c.ownerDisplayName
-        proxy = c.proxy
         dmEnabled = c.dmEnabled
         cadenceEnabled = c.cadenceEnabled
         replyEveryN = c.replyEveryN
         voiceEnabled = c.voiceEnabled
         modelName = c.model
+        schedule = c.schedule
         saved = false
     }
 
-    private func save(restart: Bool) {
+    private func save() {
         saving = true
         Task {
             await model.saveConfig([
                 "discord.owner.userId": userId,
                 "discord.owner.displayName": displayName,
-                "discord.proxy": proxy,
                 "discord.dm.enabled": dmEnabled,
                 "discord.cadence.enabled": cadenceEnabled,
                 "discord.cadence.replyEveryN": replyEveryN,
                 "voice.enabled": voiceEnabled,
                 "llm.model": modelName,
+                "discord.schedule": schedule.map { e -> [String: Any] in
+                    [
+                        "enabled": e.enabled,
+                        "time": e.time.trimmingCharacters(in: .whitespaces),
+                        "text": e.text,
+                        // 中英文逗号、顿号、空格都当分隔符，粘贴过来什么样都能用
+                        "channels": e.channels
+                            .split(whereSeparator: { ",，、 ".contains($0) })
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty },
+                    ]
+                },
             ])
             saving = false
             guard model.lastError == nil else { return }
             saved = true
             await model.reloadConfig()
-            if restart {
-                model.restartBot()
-                model.configDirty = false
-            }
         }
     }
 

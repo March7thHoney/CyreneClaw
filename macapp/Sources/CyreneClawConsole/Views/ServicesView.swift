@@ -29,7 +29,7 @@ struct ServicesView: View {
             metas: metas([("PID", model.botPid.map(String.init)),
                           ("启动", model.botRuns.map(String.init)),
                           ("上次退出", model.botLastExit.flatMap { $0 == 0 ? nil : String($0) })]),
-            note: model.configDirty ? "需重启生效" : nil
+            note: nil
         ) {
             if installed {
                 if model.bot == .running {
