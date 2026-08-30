@@ -46,6 +46,7 @@ cp config.example.json config.json
 | `sillytavern.characterFile` / `presetFile` / `worldBooks` | 相对该目录的资源路径 |
 | `prompt.personaDescription` | Discord 专用 persona |
 | `prompt.discordContract` | 输出契约，要求每轮都有台词 |
+| `prompt.tailContract` | 长度契约，追加在整段提示词的最后 |
 | `llm.baseUrl` / `model` | 指向 bridge |
 | `voice.enabled` | 语音总开关，关闭后跳过 TTS |
 | `voice.dir` | 语音资源根目录，默认项目内 `voice/`（已忽略） |
@@ -131,6 +132,11 @@ node scripts/config-set.mjs log.level=debug    # 也可以在终端直接改
 台词抽取只保留 `「」` 内的内容：同一段内的多句并成一行，段与段之间换行。
 判定带三重约束，排除 `「岁月」神像` 这类专名。
 若某轮完全抽不到台词，按 `format.onNoDialogue` 处理（默认静默跳过）。
+
+回复长度全靠提示词压，抽出来的台词一句不删。`prompt.discordContract` 注在 D0 管格式，
+把 `「」` 外的描写限制在一到两句；`prompt.tailContract` 追加在预设尾部之后，占住整段
+提示词的最末，声明自己优先于预设里的长篇写作要求。角色卡的开场白与对话示例本身就是
+目标形态：三段台词，一百二十字内。
 
 ## 语音
 

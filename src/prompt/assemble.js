@@ -111,8 +111,13 @@ export function buildMessages({ cfg, history, ambient = null, withContract = tru
     }
     if (ambient) injections.push({ depth: 1, role: 'system', content: ambient });
 
+    // 长度契约排在预设尾部之后，占住整段提示词的末尾
+    const tailContract = withContract && cfg.prompt.tailContract
+        ? [{ role: 'system', content: evaluateMacros(cfg.prompt.tailContract, fullEnv) }]
+        : [];
+
     // 预算裁剪：从最旧的聊天记录开始丢，深度注入不参与裁剪
-    const reserve = countMessagesTokens([...head, ...tail]) + (cfg.prompt.maxTokens || 0);
+    const reserve = countMessagesTokens([...head, ...tail, ...tailContract]) + (cfg.prompt.maxTokens || 0);
     const budget = Math.max(0, (cfg.prompt.maxContext || 127104) - reserve);
     let dropped = 0;
     while (chatMsgs.length > 1 && countMessagesTokens(chatMsgs) > budget) {
@@ -122,7 +127,7 @@ export function buildMessages({ cfg, history, ambient = null, withContract = tru
 
     chatMsgs = injectAtDepth(chatMsgs, injections);
 
-    const assembled = [...head, ...chatMsgs, ...tail];
+    const assembled = [...head, ...chatMsgs, ...tail, ...tailContract];
     const squashed = cfg.prompt.squashSystemMessages ? squashSystemMessages(assembled) : assembled;
     const messages = cfg.prompt.postProcessing === 'strict'
         ? strictMerge(squashed, { charName, userName, placeholder: cfg.prompt.promptPlaceholder })

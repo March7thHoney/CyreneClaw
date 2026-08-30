@@ -69,6 +69,7 @@
     "maxContext": 127104,
     "maxTokens": 8192,
     "discordContract": "在此填写 Discord 输出契约，见 README",
+    "tailContract": "在此填写长度契约，会追加到整段提示词的最后，见 README",
     "worldInfo": {
       "depth": 2,
       "budgetPercent": 25,
