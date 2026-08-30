@@ -3,24 +3,24 @@
 Discord 上的 AI 角色扮演机器人。以 SillyTavern（酒馆）的提示词组装方式为基础，
 后端复用本地的 `st-claude-cli-bridge`（`claude -p`）。
 
-只做对话，不含 agent、记忆、技能。可选开启本地 TTS，把角色台词再补一条 Discord 原生语音条。
+只做对话。可选开启本地 TTS，给角色台词补一条 Discord 原生语音条。
 
 ## 特点
 
 - **复用酒馆的现成配置**：直接读取酒馆目录下的角色卡（PNG 内嵌 v2/v3）、
-  OpenAI 预设、世界书，不复制也不改动它们。
+  OpenAI 预设、世界书，全程只读。
 - **对齐酒馆的组装行为**：prompt_order、marker、对话示例拆分、深度注入、
   `squashSystemMessages`、`strict` 后处理，与酒馆产出的请求逐字节一致。
-- **Discord 上只显示台词**：角色的动作与场景描写用于维持上下文，但不投递到 Discord。
+- **Discord 上只显示台词**：动作与场景描写留在上下文里，供下一轮使用。
 - **每个频道独立上下文**：私聊按用户、服务器按频道各自存档。
-- **只回应机器人主人**：按用户 ID 精确匹配，不做用户名匹配。
+- **只回应机器人主人**：按用户 ID 精确匹配。
 - **原生语音条**：本地 GPT-SoVITS 合成角色声音，以带波形的原生语音消息发出，
-  合成在后台串行队列里跑，不阻塞下一轮对话。
+  合成走后台串行队列。
 
 ## 依赖
 
 - Node.js >= 20
-- 运行中的 SillyTavern 数据目录（只读取，不需要酒馆本身在跑）
+- SillyTavern 数据目录（只读取，酒馆本身可以关着）
 - 运行中的 `st-claude-cli-bridge`
 - 仅开启语音时：`ffmpeg` / `ffprobe`（`brew install ffmpeg`）、
   GPT-SoVITS 运行时与对应的 Python 环境
@@ -31,7 +31,7 @@ Discord 上的 AI 角色扮演机器人。以 SillyTavern（酒馆）的提示�
 cp config.example.json config.json
 ```
 
-然后填写 `config.json`（该文件不入库）：
+然后填写 `config.json`（该文件已在 `.gitignore` 中）：
 
 | 字段 | 说明 |
 |---|---|
@@ -40,15 +40,15 @@ cp config.example.json config.json
 | `discord.owner.userId` | 你的 Discord 用户 ID，只有这个人能触发机器人 |
 | `discord.owner.displayName` | 角色对你的称呼，用于 `{{user}}` |
 | `discord.guilds` | 允许的服务器，每个可单独设 `requireMention`、`replyEveryN` |
-| `discord.cadence.enabled` | 群聊节奏总开关，关闭时只有 @ 或回复才触发 |
+| `discord.cadence.enabled` | 群聊节奏总开关，关闭后仅 @ 或回复触发 |
 | `discord.cadence.replyEveryN` | 你在一个频道里连说多少条没被回应的话，角色强制回一次 |
 | `sillytavern.dataDir` | 酒馆的 `data/default-user` 目录 |
 | `sillytavern.characterFile` / `presetFile` / `worldBooks` | 相对该目录的资源路径 |
 | `prompt.personaDescription` | Discord 专用 persona |
 | `prompt.discordContract` | 输出契约，要求每轮都有台词 |
 | `llm.baseUrl` / `model` | 指向 bridge |
-| `voice.enabled` | 语音总开关，关闭时完全不碰 TTS |
-| `voice.dir` | 语音资源根目录，默认项目内 `voice/`（不入库） |
+| `voice.enabled` | 语音总开关，关闭后跳过 TTS |
+| `voice.dir` | 语音资源根目录，默认项目内 `voice/`（已忽略） |
 | `voice.python` | GPT-SoVITS 环境的 python 绝对路径 |
 | `voice.model.*` | 相对 `voice.dir` 的权重、参考音频与参考文本 |
 | `voice.maxChars` | 单条语音的朗读上限，超出按标点回退截断 |
@@ -67,12 +67,11 @@ node scripts/install-service.mjs     # 生成 plist 到 ~/Library/LaunchAgents �
 node scripts/uninstall-service.mjs   # 卸载
 ```
 
-plist 由脚本按当前环境生成，仓库内不含任何本机路径。
+plist 由脚本按当前环境生成。
 `RunAtLoad` 使其在登录后自动启动，异常退出会被自动拉起。
 node 路径优先取软链，避免版本升级后失效。
 
-注意：机器人依赖 bridge 才能生成回复，若要重启后整条链路都可用，
-bridge 也需要各自常驻，否则机器人能登录但每次回复都会失败。
+注意：机器人依赖 bridge 生成回复，两者都要常驻才能在重启后可用。
 
 ## 触发方式
 
@@ -81,13 +80,13 @@ bridge 也需要各自常驻，否则机器人能登录但每次回复都会失�
 | 私聊 | 直接说话即可 |
 | 服务器频道 | @ 机器人，或回复它自己的消息 |
 | 服务器频道（节奏） | 你连说满 `replyEveryN` 条没被回应的话（默认 10），第 N 条强制触发 |
-| 清空当前频道记忆 | 斜杠命令 `/清空`（旧记录归档保留，不删除） |
+| 清空当前频道记忆 | 斜杠命令 `/清空`（旧记录归档保留） |
 
-服务器频道里其他人的发言会作为现场氛围注入上下文，但机器人只回应主人。
+服务器频道里其他人的发言作为现场氛围注入上下文，机器人只回应主人。
 
 群聊节奏只统计主人本人的发言，按频道各自计数：被 @ 或被回复而正常触发时计数清零，
-`/清空` 也清零，计数只在内存里，重启归零。节奏触发的那一轮与普通一轮完全相同——
-第 N 条就是这轮的输入，前面被跳过的话和其他人的发言都已经在现场氛围里，不会重复喂给模型。
+`/清空` 也清零。计数只在内存里，重启归零。节奏触发的那一轮与普通一轮相同：
+第 N 条就是这轮的输入，之前被跳过的话和其他人的发言已经在现场氛围里。
 某个服务器想用不同的阈值，在它的 `discord.guilds` 条目里加 `replyEveryN` 即可覆盖全局值。
 
 ## 输出处理
@@ -99,33 +98,33 @@ bridge 也需要各自常驻，否则机器人能登录但每次回复都会失�
 ```
 
 台词抽取只保留 `「」` 内的内容：同一段内的多句并成一行，段与段之间换行。
-判定带三重约束，避免把 `「岁月」神像` 这类专名当成台词。
-若某轮完全抽不到台词，按 `format.onNoDialogue` 处理（默认静默跳过，且不写入记录）。
+判定带三重约束，排除 `「岁月」神像` 这类专名。
+若某轮完全抽不到台词，按 `format.onNoDialogue` 处理（默认静默跳过）。
 
 ## 语音
 
-台词发出后会再补一条 Discord 原生语音条（紫色波形气泡）。语音条按 Discord 规定
-不能同时携带文字，所以它总是独立的一条，跟在文字后面。
+台词发出后会再补一条 Discord 原生语音条（紫色波形气泡）。
+Discord 的语音条只能单独成条，所以它跟在文字后面。
 
-一轮回复无论被切成几段文字，只发一条语音，取整轮台词按 `voice.maxChars` 截断。
+文字可能分成几段，语音每轮只发一条，取整轮台词按 `voice.maxChars` 截断。
 
-- 资源放在 `voice/`（模型与运行时合计约 2.3G，不入库）。
-- 合成走本机 `127.0.0.1:9880` 的 GPT-SoVITS，**直连不走代理**；
+- 资源放在 `voice/`（模型与运行时合计约 2.3G，已在 `.gitignore` 中）。
+- 合成走本机 `127.0.0.1:9880` 的 GPT-SoVITS，**直连**；
   语音条上传要过 Discord，走 `discord.proxy`。
 - 服务默认按需自动拉起（`voice.autoStart`）并常驻（`voice.keepServiceAlive`），
-  这样机器人重启后不必重新加载模型。手工管理：
+  机器人重启后模型仍留在内存里。手工管理：
 
 ```bash
-node scripts/gpt-sovits.mjs status   # 查看是否在跑
+node scripts/gpt-sovits.mjs status   # 查看运行状态
 node scripts/gpt-sovits.mjs start    # 拉起并加载模型（冷启动约 1-3 分钟）
 node scripts/gpt-sovits.mjs stop     # 停止，释放内存
 ```
 
-- 开了 `voice.warmupOnStart` 时会在登录后就预热，否则第一条语音要多等模型加载的时间。
-- 合成一条约几秒到几十秒，期间**不会**挡住文字回复；队列超过 `voice.queueMax`
-  时丢弃最早的那条，因为最新一句才是对方在等的。
-- 语音全程是尽力而为：TTS 不可达、转码失败、上传失败都只记日志并跳过，
-  文字回复照常。资源缺失时启动只打警告并自动停用语音，进程不退出。
+- 开了 `voice.warmupOnStart` 会在登录后预热，第一条语音省去模型加载的等待。
+- 合成一条约几秒到几十秒，文字回复照常发出；队列超过 `voice.queueMax`
+  时丢弃最早的那条，保留最新一句。
+- 语音全程尽力而为：TTS 不可达、转码失败、上传失败都记日志并跳过，文字回复照常。
+  资源缺失时启动打警告并停用语音，机器人照常运行。
 
 ## 致谢
 
