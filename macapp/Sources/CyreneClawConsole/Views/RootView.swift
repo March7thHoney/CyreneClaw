@@ -26,30 +26,29 @@ struct RootView: View {
                 }
             }
         }
+        .hideOnClose()
         .preferredColorScheme(.light)
         .tint(Theme.pink)
         .onAppear { model.bootstrap() }
         .onDisappear { model.stopPolling() }
     }
 
-    // navbar：浮岛毛玻璃胶囊，四周留白，不通栏
+    // navbar：浮岛毛玻璃胶囊，红黄绿灯浮在它上方的留白里，内容与卡片同一条左基线
     private var navBar: some View {
-        HStack(spacing: 10) {
-            // 隐藏标题栏后红黄绿灯浮在内容上，左侧给它们让位
-            Spacer().frame(width: 62)
+        HStack(spacing: 14) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
-                .frame(width: 24, height: 24)
+                .frame(width: 44, height: 44)
             Text("CyreneClaw 控制台")
                 .font(.system(size: 14.5, weight: .bold))
                 .foregroundStyle(Theme.brand)
             Spacer(minLength: 12)
         }
-        .padding(.horizontal, 8)
-        .frame(height: 54)
-        .glassCard(radius: 16, hoverable: false)
         .padding(.horizontal, 16)
-        .padding(.top, 12)
+        .frame(height: 60)
+        .glassCard(radius: 16, hoverable: false)
+        .padding(.horizontal, 18)
+        .padding(.top, 30)
     }
 
     private var footer: some View {

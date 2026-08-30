@@ -1,12 +1,21 @@
 import AppKit
 import SwiftUI
 
-// 单窗口工具：关窗即退出，避免 macOS 把「上次没有窗口」记进恢复状态后再也开不出来
+// 单窗口工具：点叉只隐藏窗口，App 常驻 Dock，退出走 ⌘Q
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { false }
 
     func applicationDidFinishLaunching(_ note: Notification) {
         NSApp.setActivationPolicy(.regular)
+    }
+
+    // 点 Dock 图标兜底把窗口叫回来
+    func applicationShouldHandleReopen(_ app: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            NSApp.unhide(nil)
+            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        }
+        return true
     }
 }
 

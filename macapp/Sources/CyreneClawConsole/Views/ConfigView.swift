@@ -184,7 +184,7 @@ struct ConfigView: View {
             }
             content()
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard(hoverable: false)
     }
