@@ -20,7 +20,7 @@ struct ConfigView: View {
         return userId != c.ownerUserId || displayName != c.ownerDisplayName
             || dmEnabled != c.dmEnabled || cadenceEnabled != c.cadenceEnabled
             || replyEveryN != c.replyEveryN || voiceEnabled != c.voiceEnabled
-            || modelName != c.model || schedule != c.schedule
+            || modelName != c.model || !ScheduleEntry.sameStored(schedule, c.schedule)
     }
 
     var body: some View {

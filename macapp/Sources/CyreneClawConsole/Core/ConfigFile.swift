@@ -33,11 +33,20 @@ struct ScheduleEntry: Identifiable, Equatable {
     // 服务器只是挑频道的中间态，配置里不存，清单没加载时由频道反查
     var guildId = ""
 
-    // id 每次读配置都会新生成，guildId 是界面派生的，算进相等性的话表单会永远显示成有改动
+    // 排除 id 是因为每次读配置都会新生成；纳入 guildId 是因为 SwiftUI 靠它决定要不要重绘
     static func == (a: ScheduleEntry, b: ScheduleEntry) -> Bool {
         a.enabled == b.enabled && a.time == b.time && a.kind == b.kind
             && a.text == b.text && a.emoji == b.emoji && a.sticker == b.sticker
-            && a.channelId == b.channelId
+            && a.channelId == b.channelId && a.guildId == b.guildId
+    }
+
+    // guildId 只是界面上挑频道的中间态，判断表单有没有改动时只看会落盘的字段
+    static func sameStored(_ a: [ScheduleEntry], _ b: [ScheduleEntry]) -> Bool {
+        a.count == b.count && zip(a, b).allSatisfy { x, y in
+            x.enabled == y.enabled && x.time == y.time && x.kind == y.kind
+                && x.text == y.text && x.emoji == y.emoji && x.sticker == y.sticker
+                && x.channelId == y.channelId
+        }
     }
 }
 
