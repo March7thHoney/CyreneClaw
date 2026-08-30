@@ -127,7 +127,8 @@ node scripts/gpt-sovits.mjs stop     # 停止，释放内存
 - 语音全程是尽力而为：TTS 不可达、转码失败、上传失败都只记日志并跳过，
   文字回复照常。资源缺失时启动只打警告并自动停用语音，进程不退出。
 
-## 与 SillyTavern 的关系
+## 致谢
 
-本项目是对 SillyTavern 提示词组装**行为**的独立实现，兼容其数据格式，
-不包含其源代码。SillyTavern 采用 AGPL-3.0 许可。
+- [SillyTavern](https://github.com/SillyTavern/SillyTavern)（酒馆）—— 提示词组装与角色卡、预设、世界书格式
+- openclaw —— Discord 接入流程参考
+- [st-claude-cli-bridge](https://github.com/Mar7thLover/st-claude-cli-bridge) —— 后端
