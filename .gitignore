@@ -17,3 +17,7 @@ __pycache__/
 
 # 语音模型与运行时，带前导斜杠以免连 src/voice/ 的源码一起忽略
 /voice/
+
+# 控制台 app 的编译产物
+macapp/.build/
+macapp/build/

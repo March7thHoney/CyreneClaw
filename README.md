@@ -73,6 +73,35 @@ node 路径优先取软链，避免版本升级后失效。
 
 注意：机器人依赖 bridge 生成回复，两者都要常驻才能在重启后可用。
 
+## 控制台 App
+
+`macapp/` 下是一个原生 SwiftUI 的 macOS 控制台，看三个服务的状态、启停，
+以及改 `config.json` 的常用几项。界面风格取自昔涟的官网。
+
+```bash
+bash macapp/build.sh          # 构建并替换 /Applications 里的 app
+bash macapp/build.sh --icon   # 顺带重新生成图标，需要 ImageMagick
+```
+
+产物在 `macapp/build/`，构建完会自动装到 `/Applications`，传 `--no-install` 可跳过。
+ad-hoc 签名，本机双击即开。
+
+- **状态与启停**：机器人与 bridge 都走 launchd（`launchctl kickstart` / `kill SIGTERM`），
+  语音走 `scripts/gpt-sovits.mjs`。停止用发信号而不是 `bootout`，
+  这样「用户主动停止」不会和「服务没装」混成同一种状态。
+- **项目根目录**：不写死。依次从偏好、`com.cyreneclaw.bot.plist` 的 `WorkingDirectory`、
+  app 所在位置推断，都失败才弹目录选择。
+- **配置编辑**：写回由 `scripts/config-set.mjs` 完成，只开放白名单里的 9 项，
+  token 与各类路径不开放。改完要重启机器人才生效。
+
+```bash
+node scripts/config-set.mjs --get              # 读当前值，token 只报是否已配置
+node scripts/config-set.mjs log.level=debug    # 也可以在终端直接改
+```
+
+写回是先写临时文件再 rename，不留备份文件。JSON 保序，
+唯一的副作用是 `voice.synth` 里 `1.0` 会被写成 `1`，语义不变。
+
 ## 触发方式
 
 | 场景 | 条件 |
