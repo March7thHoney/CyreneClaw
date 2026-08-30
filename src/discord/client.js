@@ -15,7 +15,8 @@ export function createClient(cfg) {
 
     const { Client, GatewayIntentBits: I, Partials: P } = djs;
     const client = new Client({
-        intents: [I.Guilds, I.GuildMessages, I.MessageContent, I.DirectMessages],
+        // GuildExpressions 只为表情与贴纸的增删改事件，清单快照靠它保持新鲜
+        intents: [I.Guilds, I.GuildMessages, I.MessageContent, I.DirectMessages, I.GuildExpressions],
         // 没有 Channel 分片，私聊消息事件根本不会触发
         partials: [P.Channel, P.Message],
         ...(dispatcher ? { rest: { agent: dispatcher } } : {}),

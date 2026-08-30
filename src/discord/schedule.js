@@ -1,9 +1,16 @@
-// 每天固定时刻往指定频道发一条固定文本，整条链路不碰模型也不碰记忆
+// 每天固定时刻往指定频道发一条文字、表情或贴纸，整条链路不碰模型也不碰记忆
 import { createLogger } from '../logger.js';
-import { sendText } from './send.js';
+import { sendText, sendSticker } from './send.js';
 
 const log = createLogger('schedule');
 const TICK_MS = 30 * 1000;
+
+// 三种类型各自的载荷字段，取出来同时用于发送与当天去重
+function payloadOf(entry) {
+    if (entry.kind === 'emoji') return entry.emoji;
+    if (entry.kind === 'sticker') return entry.sticker;
+    return entry.text;
+}
 
 export class Scheduler {
     #cfg;
@@ -40,7 +47,7 @@ export class Scheduler {
     }
 
     #log() {
-        for (const e of this.entries) log.info('定时消息已排期', { 时刻: e.time, 频道数: e.channels.length });
+        for (const e of this.entries) log.info('定时消息已排期', { 时刻: e.time, 类型: e.kind, 频道数: e.channels.length });
     }
 
     stop() {
@@ -57,7 +64,7 @@ export class Scheduler {
         for (const entry of this.entries) {
             if (entry.minutes !== nowMinutes) continue;
             // 按内容而不是下标记账，热改配置后重排也不会被误判成已发过
-            const stamp = `${entry.time}|${entry.text}`;
+            const stamp = `${entry.time}|${entry.kind}|${payloadOf(entry)}`;
             if (this.#fired.has(stamp)) continue;
             this.#fired.add(stamp);
             this.#fire(entry).catch((e) => log.error('定时消息异常', { 时刻: entry.time, err: e?.message }));
@@ -74,14 +81,19 @@ export class Scheduler {
                 }
                 // 借用会话队列，免得插进某轮多段回复的中间
                 const scopeKey = channel.guildId ? `guild/${channel.guildId}/${channel.id}` : `dm/${channel.id}`;
-                const ids = await this.#sessions.runSerial(scopeKey, () => sendText(channel, entry.text, this.#cfg));
+                const ids = await this.#sessions.runSerial(scopeKey, () => (
+                    entry.kind === 'sticker'
+                        ? sendSticker(channel, entry.sticker, this.#cfg)
+                        : sendText(channel, payloadOf(entry), this.#cfg)
+                ));
                 // runSerial 自己吞掉并记了异常，这里只补上定时消息这一侧的上下文
                 if (!ids?.length) {
                     log.warn('定时消息未发出', { 时刻: entry.time, 频道: channelId });
                     continue;
                 }
-                this.#voice.speak({ channelId, text: entry.text, replyToId: ids[0], scopeKey });
-                log.info('定时消息已发送', { 时刻: entry.time, 频道: channelId, 段数: ids.length });
+                // 表情与贴纸没有可念的正文
+                if (entry.kind === 'text') this.#voice.speak({ channelId, text: entry.text, replyToId: ids[0], scopeKey });
+                log.info('定时消息已发送', { 时刻: entry.time, 类型: entry.kind, 频道: channelId, 段数: ids.length });
             } catch (e) {
                 log.warn('定时消息发送失败', { 时刻: entry.time, 频道: channelId, err: e?.message });
             }

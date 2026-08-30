@@ -43,3 +43,13 @@ export async function sendText(channel, text, cfg) {
     }
     return ids;
 }
+
+// 贴纸没有正文，一条只发一个
+export async function sendSticker(channel, stickerId, cfg) {
+    const s = cfg.discord.send;
+    const msg = await sendWithRetry(channel, {
+        stickers: [stickerId],
+        allowedMentions: { parse: [] },
+    }, s.retry);
+    return msg?.id ? [msg.id] : [];
+}

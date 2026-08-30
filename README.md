@@ -42,7 +42,7 @@ cp config.example.json config.json
 | `discord.guilds` | 允许的服务器，每个可单独设 `requireMention`、`replyEveryN` |
 | `discord.cadence.enabled` | 群聊节奏总开关，关闭后仅 @ 或回复触发 |
 | `discord.cadence.replyEveryN` | 你在一个频道里连说多少条没被回应的话，角色强制回一次 |
-| `discord.schedule` | 定时消息，最多 5 条，见下文 |
+| `discord.schedule` | 定时消息，最多 5 条，文字、表情或贴纸，见下文 |
 | `sillytavern.dataDir` | 酒馆的 `data/default-user` 目录 |
 | `sillytavern.characterFile` / `presetFile` / `worldBooks` | 相对该目录的资源路径 |
 | `prompt.personaDescription` | Discord 专用 persona |
@@ -95,6 +95,9 @@ ad-hoc 签名，本机双击即开。
   拉不到时退回内置清单，当前值始终保留在列表里。
 - **项目根目录**：依次从偏好、`com.cyreneclaw.bot.plist` 的 `WorkingDirectory`、
   app 所在位置推断，全部失败时弹出目录选择。
+- **定时消息**：服务器、频道、类型三个下拉，内容按类型切换成输入框、表情面板或贴纸面板。
+  面板里的图取自本地缓存的表情与贴纸，见下文「服务器与表情清单」。
+  清单尚未生成时下拉禁用，提示先启动机器人。
 - **配置编辑**：写回由 `scripts/config-set.mjs` 完成，白名单覆盖 10 项，token 与各类路径为只读。
   界面给出其中 8 项，`log.level` 与 `discord.proxy` 留给脚本。
 - **即存即生效**：机器人监听 `config.json`，白名单里 `discord.proxy` 以外的 9 项保存后立即生效。
@@ -125,11 +128,14 @@ node scripts/config-set.mjs log.level=debug    # 也可以在终端直接改
 
 ## 定时消息
 
-每天固定时刻往指定频道发送固定文本，最多 5 条，在控制台 App 的「定时消息」里配置。
+每天固定时刻往指定频道发送一条文字、一个表情或一张贴纸，最多 5 条，
+在控制台 App 的「定时消息」里配置。
 
 ```json
 "schedule": [
-  { "enabled": true, "time": "12:00", "text": "中午好♪", "channels": ["频道 ID", "另一个频道 ID"] }
+  { "enabled": true, "time": "12:00", "kind": "text", "text": "中午好♪", "emoji": "", "sticker": "", "channels": ["频道 ID"] },
+  { "enabled": true, "time": "22:00", "kind": "emoji", "text": "", "emoji": "<:castorice_crying:1513417499050381322>", "sticker": "", "channels": ["频道 ID"] },
+  { "enabled": true, "time": "23:00", "kind": "sticker", "text": "", "emoji": "", "sticker": "1480641062551814155", "channels": ["频道 ID"] }
 ]
 ```
 
@@ -137,17 +143,30 @@ node scripts/config-set.mjs log.level=debug    # 也可以在终端直接改
 |---|---|
 | `enabled` | 该条的开关 |
 | `time` | 24 小时制 `HH:MM`，小时补零 |
-| `text` | 原文发出的内容，上限 1000 字 |
-| `channels` | 频道 ID 数组，一条可发往多个频道 |
+| `kind` | `text` / `emoji` / `sticker`，缺省为 `text` |
+| `text` | `kind` 为 `text` 时原文发出的内容，上限 1000 字 |
+| `emoji` | `kind` 为 `emoji` 时的自定义表情，形如 `<:名字:ID>`，动图为 `<a:名字:ID>` |
+| `sticker` | `kind` 为 `sticker` 时的贴纸 ID |
+| `channels` | 频道 ID 数组，控制台每条写入一个 |
 
-发送路径为「按 ID 取频道 → 分段发送 → 语音条」，语音跟随 `voice.enabled`。
+`kind` 决定这一条读哪个字段，另外两个字段留空。表情与贴纸取自目标频道所在的服务器。
+
+发送路径为「按 ID 取频道 → 发送 → 语音条」，`kind` 为 `text` 时才走语音，跟随 `voice.enabled`。
 会话记忆与群聊节奏计数保持原状。
 
 时刻按机器人进程的本地时间计算，launchd 的 plist 固定 `TZ=Asia/Shanghai`。
 调度器每 30 秒检查一次，与整分匹配：进程在目标分钟之内启动仍会发出，跨过整分则等次日。
 
-时间格式、频道 ID、内容为空的条目在启动时跳过并记警告，机器人照常登录。
+时间格式、频道 ID、当前 `kind` 的内容不合法的条目在启动时跳过并记警告，机器人照常登录。
 界面固定 5 槽，关闭的槽位作为占位保留行号。
+
+### 服务器与表情清单
+
+机器人在线时把所在服务器、可发言的频道、自定义表情与贴纸写成
+`<chat.dataDir>/discord-directory.json`，表情与贴纸的图片下载到
+`<chat.dataDir>/expressions/`，按 ID 命名，已存在的不重下。
+登录时生成一份，服务器、频道、表情、贴纸有变动时防抖 3 秒重出。
+控制台 App 只读这两处，下拉与选图面板的内容全部来自它们。
 
 ## 输出处理
 

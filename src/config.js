@@ -87,6 +87,8 @@ function normalizeVoice(cfg) {
 const SCHEDULE_MAX = 5;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const CHANNEL_RE = /^\d{17,20}$/;
+const EMOJI_RE = /^<a?:[A-Za-z0-9_~]{2,32}:\d{17,20}>$/;
+const SCHEDULE_KINDS = new Set(['text', 'emoji', 'sticker']);
 
 // 定时消息与语音同理：写坏一条只丢这一条，绝不能挡住机器人登录
 function normalizeSchedule(cfg) {
@@ -99,15 +101,21 @@ function normalizeSchedule(cfg) {
         if (kept.length >= SCHEDULE_MAX) { console.warn(`${at}超出 ${SCHEDULE_MAX} 条上限，已跳过`); return; }
         const time = String(item.time ?? '');
         if (!TIME_RE.test(time)) { console.warn(`${at}的时间不是 HH:MM，已跳过：${time}`); return; }
+        // 老配置没有 kind 字段，按文字处理
+        const kind = SCHEDULE_KINDS.has(item.kind) ? item.kind : 'text';
         const text = String(item.text ?? '').trim();
-        if (!text) { console.warn(`${at}没有内容，已跳过`); return; }
+        const emoji = String(item.emoji ?? '').trim();
+        const sticker = String(item.sticker ?? '').trim();
+        if (kind === 'text' && !text) { console.warn(`${at}没有内容，已跳过`); return; }
+        if (kind === 'emoji' && !EMOJI_RE.test(emoji)) { console.warn(`${at}的表情不是 <:名字:ID> 形式，已跳过：${emoji}`); return; }
+        if (kind === 'sticker' && !CHANNEL_RE.test(sticker)) { console.warn(`${at}的贴纸 ID 不是一串 17-20 位数字，已跳过：${sticker}`); return; }
         // 同一个频道填两遍只该收到一条
         const channels = [...new Set((Array.isArray(item.channels) ? item.channels : [])
             .map((c) => String(c).trim())
             .filter((c) => CHANNEL_RE.test(c)))];
         if (!channels.length) { console.warn(`${at}没有合法的频道 ID，已跳过`); return; }
         const [h, m] = time.split(':');
-        kept.push({ time, minutes: Number(h) * 60 + Number(m), text, channels });
+        kept.push({ time, minutes: Number(h) * 60 + Number(m), kind, text, emoji, sticker, channels });
     });
     cfg.discord.schedule = kept;
 }

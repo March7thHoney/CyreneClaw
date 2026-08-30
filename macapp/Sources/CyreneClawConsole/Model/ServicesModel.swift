@@ -22,6 +22,9 @@ final class ServicesModel: ObservableObject {
 
     @Published var modelOptions: [String] = []
 
+    @Published var directory = DiscordDirectory.empty
+    @Published var directoryLoaded = false
+
     @Published var busy: Set<String> = []
     @Published var hint: [String: String] = [:]
     @Published var lastError: String?
@@ -29,6 +32,7 @@ final class ServicesModel: ObservableObject {
 
     private var timer: Task<Void, Never>?
     private var bridgeModels: [String] = []
+    private var directoryStamp: Date?
 
     // bridge 拉不到时的兜底，和 st-claude-cli-bridge 默认清单保持一致
     private static let fallbackModels = [
@@ -73,6 +77,7 @@ final class ServicesModel: ObservableObject {
             config = try await ConfigStore.load(root: root)
             configLoaded = true
             applyModelOptions()
+            loadDirectoryIfChanged()
         } catch {
             lastError = error.localizedDescription
         }
@@ -113,6 +118,23 @@ final class ServicesModel: ObservableObject {
         voicePid = readPid(root: root)
         if !busy.contains("voice") {
             voice = config.voiceEnabled ? (alive ? .running : .stopped) : .disabled
+        }
+
+        loadDirectoryIfChanged()
+    }
+
+    // 清单由在线的机器人重出，时间戳没变就不重新解码
+    private func loadDirectoryIfChanged() {
+        guard let dir = config.dataDir else { return }
+        let stamp = DirectoryStore.modified(dataDir: dir)
+        guard stamp != directoryStamp else { return }
+        directoryStamp = stamp
+        if let d = DirectoryStore.load(dataDir: dir) {
+            directory = d
+            directoryLoaded = !d.isEmpty
+        } else {
+            directory = .empty
+            directoryLoaded = false
         }
     }
 

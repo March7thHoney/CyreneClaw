@@ -11,6 +11,7 @@ import { startTyping } from './discord/typing.js';
 import { sendText } from './discord/send.js';
 import { buildCommandData, handleClear } from './discord/commands.js';
 import { Scheduler } from './discord/schedule.js';
+import { createDirectoryRefresher } from './discord/directory.js';
 import { ChatStore } from './chat/store.js';
 import { SessionManager } from './chat/session.js';
 import { BridgeClient } from './llm/bridge.js';
@@ -140,6 +141,7 @@ async function handleTurn(scope, batch) {
 
 const sessions = new SessionManager(cfg, handleTurn);
 const scheduler = new Scheduler({ cfg, client, voice, sessions });
+const refreshDirectory = createDirectoryRefresher({ client, djs, cfg });
 
 // 控制台开放的配置改完即生效，不必重启
 watchConfig(cfg, (changed) => {
@@ -155,6 +157,7 @@ client.once('clientReady', async (c) => {
     log.info(`已登录：${c.user.tag}`);
     if (await voice.selfCheck()) voice.warmup();
     scheduler.start();
+    refreshDirectory();
     for (const [id, g] of c.guilds.cache) log.info(`  所在服务器：${g.name} (${id})`);
     try {
         const data = buildCommandData(djs, cfg.discord.clearCommandName || '清空');
@@ -164,6 +167,12 @@ client.once('clientReady', async (c) => {
         log.error('斜杠命令注册失败', { err: e?.message });
     }
 });
+
+// 服务器、频道、表情、贴纸有任何变动都重出一份清单给控制台 App
+for (const event of ['guildCreate', 'guildDelete', 'guildUpdate', 'channelCreate', 'channelDelete', 'channelUpdate',
+    'emojiCreate', 'emojiUpdate', 'emojiDelete', 'stickerCreate', 'stickerUpdate', 'stickerDelete']) {
+    client.on(event, () => refreshDirectory());
+}
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;

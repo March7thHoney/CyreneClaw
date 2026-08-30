@@ -1,6 +1,23 @@
 import Foundation
 
-// 定时消息的一行。channels 在界面上是逗号分隔的单行文本，存盘时才拆开
+// 定时消息的内容类型，一条只发其中一样
+enum ScheduleKind: String, CaseIterable, Identifiable, Hashable {
+    case text
+    case emoji
+    case sticker
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .text: return "文字"
+        case .emoji: return "表情"
+        case .sticker: return "贴纸"
+        }
+    }
+}
+
+// 定时消息的一行。频道在配置里是数组，界面上只选一个，存盘时再包回数组
 struct ScheduleEntry: Identifiable, Equatable {
     static let slotCount = 5
     static var emptySlots: [ScheduleEntry] { (0..<slotCount).map { _ in ScheduleEntry() } }
@@ -8,12 +25,19 @@ struct ScheduleEntry: Identifiable, Equatable {
     let id = UUID()
     var enabled = false
     var time = ""
+    var kind = ScheduleKind.text
     var text = ""
-    var channels = ""
+    var emoji = ""
+    var sticker = ""
+    var channelId = ""
+    // 服务器只是挑频道的中间态，配置里不存，清单没加载时由频道反查
+    var guildId = ""
 
-    // id 每次读配置都会新生成，算进相等性的话表单会永远显示成有改动
+    // id 每次读配置都会新生成，guildId 是界面派生的，算进相等性的话表单会永远显示成有改动
     static func == (a: ScheduleEntry, b: ScheduleEntry) -> Bool {
-        a.enabled == b.enabled && a.time == b.time && a.text == b.text && a.channels == b.channels
+        a.enabled == b.enabled && a.time == b.time && a.kind == b.kind
+            && a.text == b.text && a.emoji == b.emoji && a.sticker == b.sticker
+            && a.channelId == b.channelId
     }
 }
 
@@ -29,9 +53,10 @@ struct ConsoleConfig {
     var schedule = ScheduleEntry.emptySlots
     var tokenConfigured = false
 
-    // 探活用，不开放编辑
+    // 探活与清单文件用，不开放编辑
     var bridgeOrigin = "http://127.0.0.1:5599"
     var voiceEndpoint = "http://127.0.0.1:9880"
+    var dataDir: URL?
 }
 
 enum ConfigError: LocalizedError {
@@ -97,14 +122,17 @@ enum ConfigStore {
             e.enabled = o["enabled"]?.bool ?? false
             e.time = o["time"]?.string ?? ""
             e.text = o["text"]?.string ?? ""
-            e.channels = (o["channels"]?.array ?? []).compactMap { $0.string }.joined(separator: ", ")
+            e.kind = ScheduleKind(rawValue: o["kind"]?.string ?? "") ?? .text
+            e.emoji = o["emoji"]?.string ?? ""
+            e.sticker = o["sticker"]?.string ?? ""
+            e.channelId = (o["channels"]?.array ?? []).compactMap { $0.string }.first ?? ""
             return e
         }
         while list.count < ScheduleEntry.slotCount { list.append(ScheduleEntry()) }
         return list
     }
 
-    // 探活地址直接读原文件，不必经过写回脚本的白名单
+    // 探活地址与数据目录直接读原文件，不必经过写回脚本的白名单
     private static func readEndpoints(root: URL, into c: inout ConsoleConfig) {
         guard let data = try? Data(contentsOf: root.appendingPathComponent("config.json")),
               let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -115,6 +143,16 @@ enum ConfigStore {
         if let voice = j["voice"] as? [String: Any], let ep = voice["endpoint"] as? String {
             c.voiceEndpoint = ep
         }
+        let chat = j["chat"] as? [String: Any]
+        let raw = (chat?["dataDir"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "./data"
+        c.dataDir = resolve(raw, root: root)
+    }
+
+    // 后端支持 ~ 展开与相对项目根的写法，这里照同一套规则解析
+    private static func resolve(_ raw: String, root: URL) -> URL {
+        if raw.hasPrefix("~") { return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath) }
+        if raw.hasPrefix("/") { return URL(fileURLWithPath: raw) }
+        return root.appendingPathComponent(raw).standardizedFileURL
     }
 
     // 走 stdin 传 JSON，彻底绕开 shell 引用与中文、等号的坑

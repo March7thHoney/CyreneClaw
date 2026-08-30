@@ -65,3 +65,17 @@ struct MetaItem: View {
         .font(.system(size: 11.5))
     }
 }
+
+// 输入框统一成玻璃描边款，和按钮同一套圆角
+struct InputBox: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.system(size: 12.5))
+            .foregroundStyle(Theme.ink)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.7)))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color(hex: 0xFCE7F3), lineWidth: 1))
+    }
+}

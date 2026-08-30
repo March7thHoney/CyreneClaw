@@ -24,7 +24,10 @@
       {
         "enabled": false,
         "time": "12:00",
+        "kind": "text",
         "text": "（每天这个时刻原样发出的话，用角色口吻写）",
+        "emoji": "",
+        "sticker": "",
         "channels": [
           "在此填写频道 ID"
         ]

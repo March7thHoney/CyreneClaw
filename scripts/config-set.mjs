@@ -22,8 +22,10 @@ const ALLOW = {
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const CHANNEL_RE = /^\d{17,20}$/;
+const EMOJI_RE = /^<a?:[A-Za-z0-9_~]{2,32}:\d{17,20}>$/;
 const SCHEDULE_MAX = 5;
-const SCHEDULE_KEYS = new Set(['enabled', 'time', 'text', 'channels']);
+const SCHEDULE_KEYS = new Set(['enabled', 'time', 'kind', 'text', 'emoji', 'sticker', 'channels']);
+const SCHEDULE_KINDS = ['text', 'emoji', 'sticker'];
 
 // 关掉的槽位允许留空，但填了的值仍要合法，否则界面上的占位行会被写成脏数据
 function validateSchedule(list) {
@@ -33,17 +35,23 @@ function validateSchedule(list) {
         const at = `第 ${i + 1} 条`;
         if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`${at}的格式不对`);
         for (const k of Object.keys(item)) if (!SCHEDULE_KEYS.has(k)) throw new Error(`${at}多了一个字段 ${k}`);
-        const { enabled, time = '', text = '', channels = [] } = item;
+        const { enabled, time = '', kind = 'text', text = '', emoji = '', sticker = '', channels = [] } = item;
         if (typeof enabled !== 'boolean') throw new Error(`${at}的开关状态不对`);
         if (typeof time !== 'string' || typeof text !== 'string') throw new Error(`${at}的时间或内容格式不对`);
+        if (typeof emoji !== 'string' || typeof sticker !== 'string') throw new Error(`${at}的表情或贴纸格式不对`);
+        if (!SCHEDULE_KINDS.includes(kind)) throw new Error(`${at}：类型只能是 ${SCHEDULE_KINDS.join(' / ')}`);
         if (!Array.isArray(channels) || channels.some((c) => typeof c !== 'string')) throw new Error(`${at}的频道格式不对`);
         if (time && !TIME_RE.test(time)) throw new Error(`${at}：时间请填 24 小时制的 HH:MM，例如 09:05 或 20:10`);
         if (text.length > 1000) throw new Error(`${at}：内容最多 1000 字`);
+        if (emoji && !EMOJI_RE.test(emoji)) throw new Error(`${at}：表情要写成 <:名字:ID> 或 <a:名字:ID>`);
+        if (sticker && !CHANNEL_RE.test(sticker)) throw new Error(`${at}：贴纸 ID 是一串 17-20 位数字`);
         for (const c of channels) if (!CHANNEL_RE.test(c)) throw new Error(`${at}：频道 ID 是一串 17-20 位数字`);
         if (!enabled) return;
         if (!time) throw new Error(`${at}：请填写时间`);
-        if (!text.trim()) throw new Error(`${at}：请填写内容`);
-        if (!channels.length) throw new Error(`${at}：请填写频道 ID`);
+        if (kind === 'text' && !text.trim()) throw new Error(`${at}：请填写内容`);
+        if (kind === 'emoji' && !emoji) throw new Error(`${at}：请选择表情`);
+        if (kind === 'sticker' && !sticker) throw new Error(`${at}：请选择贴纸`);
+        if (!channels.length) throw new Error(`${at}：请选择频道`);
     });
 }
 

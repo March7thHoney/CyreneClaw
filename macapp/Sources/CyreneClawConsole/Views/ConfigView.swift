@@ -88,29 +88,27 @@ struct ConfigView: View {
             HStack(spacing: 10) {
                 Spacer().frame(width: 30)
                 Text("时间").frame(width: 62, alignment: .leading)
+                Text("服务器").frame(width: 140, alignment: .leading)
+                Text("频道").frame(width: 140, alignment: .leading)
+                Text("类型").frame(width: 78, alignment: .leading)
                 Text("内容").frame(maxWidth: .infinity, alignment: .leading)
-                Text("频道 ID，逗号分隔").frame(width: 200, alignment: .leading)
             }
             .font(.system(size: 11))
             .foregroundStyle(Theme.inkDesc)
 
             ForEach($schedule) { $entry in
-                HStack(spacing: 10) {
-                    Toggle("", isOn: $entry.enabled)
-                        .labelsHidden().toggleStyle(.switch).tint(Theme.pink)
-                        .scaleEffect(0.75).frame(width: 30)
-                    TextField("12:00", text: $entry.time)
-                        .textFieldStyle(.plain).modifier(InputBox()).frame(width: 62)
-                    TextField("中午好♪", text: $entry.text)
-                        .textFieldStyle(.plain).modifier(InputBox())
-                    TextField("1234567890123456789", text: $entry.channels)
-                        .textFieldStyle(.plain).modifier(InputBox()).frame(width: 200)
-                }
+                ScheduleRow(entry: $entry, directory: model.directory, dataDir: model.config.dataDir)
             }
 
-            Text("每天该时刻按原文发出，不经过模型，也不进入对话记忆。错过就跳过，不补发。")
+            Text("每天该时刻发出一条文字、表情或贴纸，不经过模型，也不进入对话记忆。错过就跳过，不补发。")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.inkDesc)
+
+            if !model.directoryLoaded {
+                Text("服务器、频道、表情、贴纸的清单由在线的机器人生成，启动机器人后可选。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.warn)
+            }
         }
     }
 
@@ -183,12 +181,12 @@ struct ConfigView: View {
                     [
                         "enabled": e.enabled,
                         "time": e.time.trimmingCharacters(in: .whitespaces),
+                        "kind": e.kind.rawValue,
                         "text": e.text,
-                        // 中英文逗号、顿号、空格都当分隔符，粘贴过来什么样都能用
-                        "channels": e.channels
-                            .split(whereSeparator: { ",，、 ".contains($0) })
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                            .filter { !$0.isEmpty },
+                        "emoji": e.emoji,
+                        "sticker": e.sticker,
+                        // 界面上一条只选一个频道，配置里仍是数组
+                        "channels": (e.channelId.isEmpty ? [] : [e.channelId]) as [String],
                     ]
                 },
             ])
@@ -250,16 +248,135 @@ struct ConfigView: View {
     }
 }
 
-// 输入框统一成玻璃描边款，和按钮同一套圆角
-private struct InputBox: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .font(.system(size: 12.5))
-            .foregroundStyle(Theme.ink)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.7)))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color(hex: 0xFCE7F3), lineWidth: 1))
+// 一行里有两个各自独立的选图面板，拆成单独的视图才好各管各的开关状态
+private struct ScheduleRow: View {
+    @Binding var entry: ScheduleEntry
+    let directory: DiscordDirectory
+    let dataDir: URL?
+
+    @State private var picking = false
+
+    // 配置里只存频道，清单加载好之后服务器就能反查出来
+    private var guildId: String {
+        entry.guildId.isEmpty ? (directory.guildOf(channelId: entry.channelId)?.id ?? "") : entry.guildId
+    }
+
+    private var guild: DirGuild? { directory.guild(id: guildId) }
+
+    // 换服务器等于换一整套频道、表情、贴纸，旧的选择留着只会发到错的地方
+    private var guildBinding: Binding<String> {
+        Binding(get: { guildId }, set: { next in
+            guard next != guildId else { return }
+            entry.guildId = next
+            entry.channelId = ""
+            entry.emoji = ""
+            entry.sticker = ""
+        })
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Toggle("", isOn: $entry.enabled)
+                .labelsHidden().toggleStyle(.switch).tint(Theme.pink)
+                .scaleEffect(0.75).frame(width: 30)
+            TextField("12:00", text: $entry.time)
+                .textFieldStyle(.plain).modifier(InputBox()).frame(width: 62)
+            guildPicker.frame(width: 140)
+            channelPicker.frame(width: 140)
+            kindPicker.frame(width: 78)
+            content.frame(maxWidth: .infinity)
+        }
+    }
+
+    private var guildPicker: some View {
+        Picker("", selection: guildBinding) {
+            Text(directory.isEmpty ? "启动机器人后可选" : "未选择").tag("")
+            ForEach(directory.guilds) { Text($0.name).tag($0.id) }
+        }
+        .pickerStyle(.menu).labelsHidden()
+        .disabled(directory.isEmpty)
+    }
+
+    private var channelPicker: some View {
+        Picker("", selection: $entry.channelId) {
+            Text("未选择").tag("")
+            // 清单还没生成时把配置里的原始 ID 摆出来，存量配置才不会在界面上凭空消失
+            if !entry.channelId.isEmpty && directory.channel(id: entry.channelId) == nil {
+                Text(entry.channelId).tag(entry.channelId)
+            }
+            ForEach(guild?.channels ?? []) { Text("#\($0.name)").tag($0.id) }
+        }
+        .pickerStyle(.menu).labelsHidden()
+        .disabled(guild == nil)
+    }
+
+    private var kindPicker: some View {
+        Picker("", selection: $entry.kind) {
+            ForEach(ScheduleKind.allCases) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.menu).labelsHidden()
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch entry.kind {
+        case .text:
+            TextField("中午好♪", text: $entry.text).textFieldStyle(.plain).modifier(InputBox())
+        case .emoji:
+            pickerButton(label: emojiLabel, image: emojiImage) {
+                EmojiPickerPanel(dataDir: dataDir, emojis: guild?.emojis ?? []) { e in
+                    entry.emoji = e.token
+                    picking = false
+                }
+            }
+        case .sticker:
+            pickerButton(label: stickerLabel, image: stickerImage) {
+                StickerPickerPanel(dataDir: dataDir, stickers: guild?.stickers ?? []) { s in
+                    entry.sticker = s.id
+                    picking = false
+                }
+            }
+        }
+    }
+
+    private func pickerButton<P: View>(label: (String, Bool), image: String,
+                                       @ViewBuilder panel: @escaping () -> P) -> some View {
+        Button { picking = true } label: {
+            HStack(spacing: 6) {
+                if !image.isEmpty { ExpressionThumb(dataDir: dataDir, path: image, side: 18) }
+                Text(label.0)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(label.1 ? Theme.ink : Theme.inkDesc)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(Theme.inkMeta)
+            }
+            .modifier(InputBox())
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(guild == nil)
+        .popover(isPresented: $picking, arrowEdge: .bottom) { panel() }
+    }
+
+    // 第二个值表示这一格已经选好了，用来分深浅两档字色
+    private var emojiLabel: (String, Bool) {
+        if let e = guild?.emojis.first(where: { $0.token == entry.emoji }) { return (":\(e.name):", true) }
+        if !entry.emoji.isEmpty { return ("已失效", false) }
+        return (guild == nil ? "先选频道" : "选择表情", false)
+    }
+
+    private var emojiImage: String {
+        guild?.emojis.first { $0.token == entry.emoji }?.image ?? ""
+    }
+
+    private var stickerLabel: (String, Bool) {
+        if let s = guild?.stickers.first(where: { $0.id == entry.sticker }) { return (s.name, true) }
+        if !entry.sticker.isEmpty { return ("已失效", false) }
+        return (guild == nil ? "先选频道" : "选择贴纸", false)
+    }
+
+    private var stickerImage: String {
+        guild?.stickers.first { $0.id == entry.sticker }?.image ?? ""
     }
 }
