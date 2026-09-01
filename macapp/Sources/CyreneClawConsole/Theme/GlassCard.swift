@@ -1,6 +1,6 @@
 import SwiftUI
 
-// .glass-card / .glass-card-hover 的 SwiftUI 版
+// 玻璃卡的轻量版：纯色半透明底，单层小阴影。实时背景模糊与大半径阴影太吃渲染
 struct GlassCard: ViewModifier {
     var radius: CGFloat = Theme.cardRadius
     var hoverable: Bool = true
@@ -9,27 +9,11 @@ struct GlassCard: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return content
-            .background {
-                // backdrop-filter: blur(20px) saturate(1.4)：底下的光斑要透上来
-                shape.fill(Theme.glassFill)
-                    .background(shape.fill(.ultraThinMaterial))
-            }
+            .background(shape.fill(Color.white.opacity(0.72)))
             .overlay {
                 shape.strokeBorder(hovered ? Theme.pink300.opacity(0.6) : Theme.glassStroke, lineWidth: 1)
             }
-            // inset 0 1px 0 rgba(255,255,255,.9)：只描上半圈，模拟顶部内高光
-            .overlay {
-                shape.strokeBorder(
-                    LinearGradient(colors: [.white.opacity(0.9), .clear],
-                                   startPoint: .top, endPoint: .center),
-                    lineWidth: 1)
-            }
-            .clipShape(shape)
-            .shadow(color: Theme.shadowTint.opacity(hovered ? 0.06 : 0.05), radius: hovered ? 2 : 1, y: 1)
-            .shadow(color: Theme.shadowTint.opacity(hovered ? 0.28 : 0.16),
-                    radius: hovered ? 16 : 11, y: hovered ? 18 : 10)
-            .offset(y: hovered ? -3 : 0)
-            .animation(.easeOut(duration: 0.3), value: hovered)
+            .shadow(color: Theme.shadowTint.opacity(hovered ? 0.22 : 0.13), radius: 5, y: 3)
             .onHover { if hoverable { hovered = $0 } }
     }
 }

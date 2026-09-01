@@ -37,11 +37,14 @@ struct RootView: View {
             } else {
                 VStack(spacing: 0) {
                     navBar
-                    // 聊天状态在 chat 里持有，切页销毁视图也不丢
-                    if tab == .console {
+                    // 控制台整页重建太贵（十几个 AppKit 下拉），常驻藏起来；聊天页轻，随切随建
+                    ZStack {
                         console
-                    } else {
-                        ChatView(model: model, chat: chat)
+                            .opacity(tab == .console ? 1 : 0)
+                            .allowsHitTesting(tab == .console)
+                        if tab == .chat {
+                            ChatView(model: model, chat: chat)
+                        }
                     }
                 }
             }

@@ -21,8 +21,8 @@ struct BrandButtonStyle: ButtonStyle {
                 }
             }
             .clipShape(shape)
-            .shadow(color: (hovered ? Color(hex: 0x8C5AE6) : Color(hex: 0xD946A0)).opacity(0.55),
-                    radius: hovered ? 11 : 8, y: hovered ? 11 : 8)
+            .shadow(color: (hovered ? Color(hex: 0x8C5AE6) : Color(hex: 0xD946A0)).opacity(0.5),
+                    radius: 5, y: 4)
             .offset(y: hovered ? -1 : 0)
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .opacity(enabled ? 1 : 0.4)
