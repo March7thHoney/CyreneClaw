@@ -141,7 +141,7 @@ private struct ChatInput: View {
                 Text("说点什么…")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.inkMeta)
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 15)
                     .padding(.vertical, 11)
                     .allowsHitTesting(false)
             }
@@ -150,7 +150,7 @@ private struct ChatInput: View {
                 .foregroundStyle(Theme.ink)
                 .scrollContentBackground(.hidden)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 7)
+                .padding(.vertical, 11)
                 .frame(minHeight: 38, maxHeight: 120)
                 .fixedSize(horizontal: false, vertical: true)
                 .disabled(!enabled)
