@@ -20,6 +20,8 @@ final class ServicesModel: ObservableObject {
     @Published var voice = ServiceState.unknown
     @Published var voicePid: Int32?
 
+    @Published var localChat = ServiceState.unknown
+
     @Published var modelOptions: [String] = []
 
     @Published var directory = DiscordDirectory.empty
@@ -89,6 +91,7 @@ final class ServicesModel: ObservableObject {
         async let bridgeStatus = Launchctl.status(Labels.bridge)
         async let health = HealthProbe.json("\(config.bridgeOrigin)/health")
         async let voiceAlive = HealthProbe.reachable("\(config.voiceEndpoint)/change_refer")
+        async let localAlive = HealthProbe.json("\(config.localChatOrigin)/local/health")
 
         let b = await botStatus
         if !busy.contains("bot") {
@@ -113,6 +116,8 @@ final class ServicesModel: ObservableObject {
             bridgeModel = nil
             bridgeQueue = nil
         }
+
+        localChat = await localAlive == nil ? .stopped : .running
 
         let alive = await voiceAlive
         voicePid = readPid(root: root)

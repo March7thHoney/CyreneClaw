@@ -15,14 +15,14 @@ import { Scheduler } from './discord/schedule.js';
 import { createDirectoryRefresher } from './discord/directory.js';
 import { ChatStore } from './chat/store.js';
 import { SessionManager } from './chat/session.js';
+import { runTurn, commitReply } from './chat/turn.js';
 import { BridgeClient } from './llm/bridge.js';
+import { createLocalServer } from './local/server.js';
 import { VoiceMessenger } from './voice/index.js';
-import { buildMessages } from './prompt/assemble.js';
 import { loadCard } from './prompt/card.js';
 import { initTokenizer } from './prompt/tokens.js';
-import { stripComments, redact } from './format/strip.js';
+import { stripComments } from './format/strip.js';
 import { extractDialogue } from './format/dialogue.js';
-import { baseChatReplace } from './prompt/macros.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
@@ -42,79 +42,23 @@ const voice = new VoiceMessenger({ cfg, client, djs });
 
 let emptyContentStreak = 0;
 
-// 被回复的消息作为背景带入，正文里不重复
-function renderUserContent(entry) {
-    if (!entry.replyTo) return entry.content;
-    const body = entry.replyTo.body.length > 200 ? entry.replyTo.body.slice(0, 200) + '…' : entry.replyTo.body;
-    return `<reply_to speaker="${entry.replyTo.name}">${body}</reply_to>\n${entry.content}`;
-}
-
-function dumpPrompt(scope, messages, raw, dialogue) {
-    if (!cfg.log.logPrompts) return;
-    const dir = path.join(cfg.log.dir, 'prompts');
-    fs.mkdirSync(dir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const body = [
-        `# scope: ${scope.key}`,
-        `\n===== messages (${messages.length}) =====`,
-        JSON.stringify(messages, null, 2),
-        '\n===== 模型原文 =====', raw,
-        '\n===== 抽取后 =====', dialogue,
-    ].join('\n');
-    fs.writeFileSync(path.join(dir, `req-${stamp}.txt`), body);
-}
-
 async function handleTurn(scope, batch) {
     const channel = batch[0].channel;
-    const card = loadCard(cfg.sillytavern.characterPath);
-    const history = store.load(scope).map((m) => ({
-        role: m.role,
-        // 送回模型前剥掉自查注释，与酒馆的 isPrompt 行为一致
-        content: m.role === 'assistant' ? stripComments(m.content) : renderUserContent(m),
-    }));
-
-    // 新频道先注入开场白，既是场景锚点也是最强的格式范例
-    if (!history.length && cfg.chat.seedFirstMes && card.first_mes) {
-        const greeting = baseChatReplace(card.first_mes, { char: card.name, user: cfg.discord.owner.displayName });
-        const entry = { id: `seed-${Date.now()}`, role: 'assistant', name: card.name, content: greeting, ts: Date.now() };
-        store.append(scope, entry);
-        history.push({ role: 'assistant', content: greeting });
-        if (cfg.chat.sendGreetingOnNewScope) {
-            const opening = extractDialogue(greeting, { joinSeparator: cfg.format.joinSeparator });
-            if (opening) await sendText(channel, opening, cfg);
-        }
-    }
-
-    // 连打的几条并成一个 user turn
-    const merged = batch.map((b) => b.content).join('\n');
-    const userEntry = {
-        id: batch[batch.length - 1].id,
-        role: 'user',
-        name: batch[0].authorName,
-        content: merged,
-        ts: Date.now(),
-        ...(batch[0].replyTo ? { replyTo: batch[0].replyTo } : {}),
-    };
-    store.append(scope, userEntry);
-    history.push({ role: 'user', content: renderUserContent(userEntry) });
-
     const ambientBlock = scope.kind === 'guild'
         ? ambient.render(scope.channelId, scope.label, new Set(batch.map((b) => b.id)))
         : null;
 
     const stopTyping = startTyping(channel, cfg.discord.typing);
     try {
-        const { messages, stats } = buildMessages({ cfg, history, ambient: ambientBlock });
-        log.info('开始生成', { scope: scope.key, 世界书: stats.wiActivated, 历史: history.length });
-
-        const raw = await bridge.complete(messages);
-        const stripped = stripComments(raw, { dropUnclosed: cfg.format.dropUnclosedComment });
-        let dialogue = extractDialogue(stripped, { joinSeparator: cfg.format.joinSeparator });
-        const { text, hits } = redact(dialogue, cfg.format.redact);
-        dialogue = text.trim();
-        if (hits.length) log.warn('输出命中敏感信息并已过滤', { hits });
-
-        dumpPrompt(scope, messages, raw, dialogue);
+        const { card, raw, stripped, dialogue } = await runTurn({
+            cfg, store, bridge, scope, batch, ambient: ambientBlock,
+            // 新频道的开场白发出去，让频道里看得见这一轮的起点
+            onGreeting: async (greeting) => {
+                if (!cfg.chat.sendGreetingOnNewScope) return;
+                const opening = extractDialogue(greeting, { joinSeparator: cfg.format.joinSeparator });
+                if (opening) await sendText(channel, opening, cfg);
+            },
+        });
 
         if (!dialogue) {
             // 抽不到对白就不发也不入库，这一轮当作没发生，下次从同一状态重来
@@ -127,8 +71,7 @@ async function handleTurn(scope, batch) {
         }
 
         const ids = await sendText(channel, dialogue, cfg);
-        // 存原文而非抽取结果，动作描写要留在记忆里
-        store.append(scope, { id: `gen-${Date.now()}`, role: 'assistant', name: card.name, content: raw, ts: Date.now(), sent: ids });
+        commitReply({ store, scope, card, raw, sent: ids });
         // 合成要几十秒，只投递不等待，否则同 scope 的下一条消息会被串行队列卡住
         voice.speak({ channelId: channel.id, text: dialogue, replyToId: ids[0] ?? null, scopeKey: scope.key });
         // 触发这一轮的是批次里最后一条，反应加在它身上
@@ -144,6 +87,7 @@ async function handleTurn(scope, batch) {
 
 const sessions = new SessionManager(cfg, handleTurn);
 const scheduler = new Scheduler({ cfg, client, voice, sessions });
+const localServer = createLocalServer({ cfg, store, bridge, voice, sessions });
 const refreshDirectory = createDirectoryRefresher({ client, djs, cfg });
 
 // 控制台开放的配置改完即生效，不必重启
@@ -265,7 +209,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
         log.info('收到退出信号，正在断开');
         voice.drain(cfg.voice.shutdownWaitMs)
             .catch(() => {})
-            .finally(() => { voice.shutdown(); return client.destroy(); })
+            .finally(() => { localServer.close(); voice.shutdown(); return client.destroy(); })
             .finally(() => process.exit(0));
     });
 }
@@ -296,6 +240,9 @@ async function waitForProxy(proxyUrl, maxWaitMs = 180000) {
     log.warn('等待代理超时，仍尝试登录');
     return false;
 }
+
+// 本机聊天不依赖 Discord 连接，先起服务再去等代理
+localServer.start();
 
 await waitForProxy(cfg.discord.proxy);
 

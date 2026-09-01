@@ -84,6 +84,19 @@ function normalizeVoice(cfg) {
     }
 }
 
+// 本机聊天的回环服务，端口不进界面，缺省即可用
+function normalizeLocalChat(cfg) {
+    const l = { port: 5610, ...(cfg.localChat || {}) };
+    const port = Number(l.port);
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+        console.warn(`localChat.port 不是 1024-65535 的整数，已改用 5610：${l.port}`);
+        l.port = 5610;
+    } else {
+        l.port = port;
+    }
+    cfg.localChat = l;
+}
+
 const SCHEDULE_MAX = 5;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const CHANNEL_RE = /^\d{17,20}$/;
@@ -238,6 +251,7 @@ export function loadConfig(file) {
     }
 
     normalizeVoice(cfg);
+    normalizeLocalChat(cfg);
     normalizeSchedule(cfg);
     normalizeReaction(cfg);
 

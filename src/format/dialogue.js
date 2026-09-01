@@ -57,3 +57,22 @@ export function extractDialogue(text, opts = {}) {
     }
     return groups.map((g) => g.join(joinSeparator)).join('\n');
 }
+
+// 把正文切成台词与场景描写两种片段，供本机聊天分色显示
+export function segmentText(text) {
+    if (!text) return [];
+    const src = String(text);
+    const spans = scanQuotes(src).filter((s) => isDialogue(s, src));
+    const out = [];
+    const push = (kind, raw) => {
+        if (raw) out.push({ kind, text: raw });
+    };
+    let cursor = 0;
+    for (const s of spans) {
+        push('narration', src.slice(cursor, s.open));
+        cursor = s.open + s.inner.length + (s.closed ? 2 : 1);
+        push('dialogue', src.slice(s.open, cursor));
+    }
+    push('narration', src.slice(cursor));
+    return out;
+}

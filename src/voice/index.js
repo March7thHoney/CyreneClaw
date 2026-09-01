@@ -107,6 +107,18 @@ export class VoiceMessenger {
             .catch((e) => log.warn('语音预热失败，首条会现拉起', { err: e?.message }));
     }
 
+    // 只合成不上传，本机聊天点播用。仍排进同一条队列，GPT-SoVITS 只有一个模型
+    async synthesizeFile(text) {
+        if (!this.#enabled) throw new Error('语音未开启');
+        const speech = stripForSpeech(text, { maxChars: this.#cfg.maxChars });
+        if (speech.length < this.#cfg.minChars) throw new Error('可朗读的内容太短');
+        return new Promise((resolve, reject) => {
+            // 手点的这一条不套用 queueMax 丢弃：被静默丢掉会像是坏了
+            this.#queue.push({ kind: 'wav', speech, scopeKey: 'local/main', resolve, reject });
+            this.#pump();
+        });
+    }
+
     // 刻意返回 void 而不是 Promise：一旦能 await，将来手滑就会把对话卡几十秒
     speak(job) {
         if (!this.#enabled) return;
@@ -134,6 +146,7 @@ export class VoiceMessenger {
                     await this.#one(job);
                 } catch (e) {
                     log.warn('语音这一条失败，已跳过', { scope: job.scopeKey, err: e?.message });
+                    job.reject?.(e);
                 } finally {
                     this.#phase = null;
                 }
@@ -141,15 +154,13 @@ export class VoiceMessenger {
         })().finally(() => { this.#running = null; });
     }
 
-    async #one(job) {
-        const started = Date.now();
-        this.#phase = 'synth';
-        let wav;
+    // 超时连击后重启服务是唯一的自愈手段，两种 job 共用
+    async #synth(speech) {
         try {
-            wav = await this.#tts.synthesize(job.speech);
+            const wav = await this.#tts.synthesize(speech);
             this.#timeouts = 0;
+            return wav;
         } catch (e) {
-            // 服务卡死时重新拉起是唯一的自愈手段
             if (/timeout|UND_ERR/i.test(e?.message || '') && ++this.#timeouts >= TIMEOUT_STRIKES) {
                 log.error('合成连续超时，重启 GPT-SoVITS');
                 this.#tts.stopService();
@@ -158,6 +169,17 @@ export class VoiceMessenger {
             }
             throw e;
         }
+    }
+
+    async #one(job) {
+        const started = Date.now();
+        this.#phase = 'synth';
+        // 本机点播只要音频本体，合成完就交回去
+        if (job.kind === 'wav') {
+            job.resolve(await this.#synth(job.speech));
+            return;
+        }
+        const wav = await this.#synth(job.speech);
         const ogg = path.join(this.#cfg.runtimeStateDir, `discord-voice-${Date.now()}-${Math.random().toString(16).slice(2)}.ogg`);
         fs.mkdirSync(this.#cfg.runtimeStateDir, { recursive: true });
         try {

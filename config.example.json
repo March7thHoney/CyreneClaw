@@ -110,6 +110,9 @@
     "timeoutMs": 600000,
     "maxConcurrent": 1
   },
+  "localChat": {
+    "port": 5610
+  },
   "chat": {
     "dataDir": "./data",
     "seedFirstMes": true,

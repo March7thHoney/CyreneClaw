@@ -67,7 +67,9 @@ struct ConsoleConfig {
     // 探活与清单文件用，不开放编辑
     var bridgeOrigin = "http://127.0.0.1:5599"
     var voiceEndpoint = "http://127.0.0.1:9880"
+    var localChatOrigin = "http://127.0.0.1:5610"
     var dataDir: URL?
+    var voiceGeneratedDir: URL?
 }
 
 enum ConfigError: LocalizedError {
@@ -164,6 +166,11 @@ enum ConfigStore {
         }
         if let voice = j["voice"] as? [String: Any], let ep = voice["endpoint"] as? String {
             c.voiceEndpoint = ep
+        }
+        let voiceDirRaw = ((j["voice"] as? [String: Any])?["dir"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "./voice"
+        c.voiceGeneratedDir = resolve(voiceDirRaw, root: root).appendingPathComponent("generated")
+        if let local = j["localChat"] as? [String: Any], let port = local["port"] as? Int {
+            c.localChatOrigin = "http://127.0.0.1:\(port)"
         }
         let chat = j["chat"] as? [String: Any]
         let raw = (chat?["dataDir"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "./data"

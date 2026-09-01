@@ -55,6 +55,7 @@ struct ServicesView: View {
         HStack(spacing: 20) {
             dependency("bridge", model.bridge, bridgeDetail)
             dependency("语音", model.voice, shortHost(model.config.voiceEndpoint))
+            dependency("本机聊天", model.localChat, shortHost(model.config.localChatOrigin))
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 6)

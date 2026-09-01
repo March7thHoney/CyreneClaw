@@ -23,3 +23,6 @@ export function scopeFilePath(dataDir, scope) {
 export function archiveFilePath(dataDir, scope, stamp) {
     return path.join(dataDir, 'archive', ...scope.key.split('/'), `${stamp}.jsonl`);
 }
+
+// 本机聊天只有一条线，固定一个 scope，与 dm/guild 各自独立
+export const LOCAL_SCOPE = { kind: 'local', key: 'local/main', label: '本机' };

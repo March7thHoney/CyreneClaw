@@ -13,6 +13,7 @@ Discord 上的 AI 角色扮演机器人。以 SillyTavern（酒馆）的提示�
   `squashSystemMessages`、`strict` 后处理，与酒馆产出的请求逐字节一致。
 - **Discord 上只显示台词**：动作与场景描写留在上下文里，供下一轮使用。
 - **每个频道独立上下文**：私聊按用户、服务器按频道各自存档。
+- **控制台内直接对话**：本机聊天页显示模型原文，台词与场景描写分色，独立存档。
 - **只回应机器人主人**：按用户 ID 精确匹配。
 - **原生语音条**：本地 GPT-SoVITS 合成角色声音，以带波形的原生语音消息发出，
   合成走后台串行队列。
@@ -43,6 +44,7 @@ cp config.example.json config.json
 | `discord.cadence.enabled` | 群聊节奏总开关，关闭后仅 @ 或回复触发 |
 | `discord.cadence.replyEveryN` | 你在一个频道里连说多少条没被回应的话，角色强制回一次 |
 | `discord.schedule` | 定时消息，最多 5 条，文字、表情或贴纸，见下文 |
+| `localChat.port` | 本机聊天服务的回环端口，缺省 5610 |
 | `sillytavern.dataDir` | 酒馆的 `data/default-user` 目录 |
 | `sillytavern.characterFile` / `presetFile` / `worldBooks` | 相对该目录的资源路径 |
 | `prompt.personaDescription` | Discord 专用 persona |
@@ -77,8 +79,9 @@ node 路径优先取软链。
 
 ## 控制台 App
 
-`macapp/` 下是一个原生 SwiftUI 的 macOS 控制台，单页，上半是服务状态与机器人启停，
-下半是 `config.json` 的常用几项。界面风格取自昔涟的官网。
+`macapp/` 下是一个原生 SwiftUI 的 macOS 控制台，两页：控制台页管服务状态、机器人启停与
+`config.json` 的常用几项，聊天页在本机直接和角色对话。navbar 右侧的胶囊切页，停在哪一页记进偏好。
+界面风格取自昔涟的官网。
 
 ```bash
 bash macapp/build.sh          # 构建并替换 /Applications 里的 app
@@ -109,6 +112,39 @@ node scripts/config-set.mjs log.level=debug    # 也可以在终端直接改
 ```
 
 写回先写临时文件再 rename，JSON 保序。`voice.synth` 里的 `1.0` 会被写成 `1`。
+
+## 本机聊天
+
+控制台 App 的聊天页，在本机直接和角色对话，全程不经过 Discord。
+
+```
+模型原文 ├─→ 原样存入 data/chats/local/main.jsonl
+        └─→ 按「」切成台词与场景描写两种片段 → App 里分色显示
+```
+
+台词用深墨色并保留 `「」`，场景描写用淡紫斜体，同一个气泡里内联混排。
+切分复用 Discord 那条链路的 `scanQuotes` 与三重约束，App 上标成台词的字与 Discord 发出去的逐字相同。
+
+- **独立存档**：`data/chats/local/main.jsonl`，与私聊、频道的记忆各记各的。
+  清空走「清空」按钮，旧记录归档到 `data/archive/local/main/`。
+- **提示词**：不注入 `prompt.discordContract` 与 `prompt.tailContract`，
+  描写按角色卡与预设的原生形态展开。其余组装与 Discord 完全一致。
+- **语音**：每条回复右上角一个喇叭，点了才合成并在 App 里播放，跟随 `voice.enabled`。
+  朗读文本与 Discord 语音条同一条链路，只念台词。
+- **回车发送**，Shift+回车换行。
+
+服务随机器人进程启动，只听 `127.0.0.1:<localChat.port>`，缺省 5610。
+Discord 连不上时本机聊天照常可用。
+
+| 方法 路径 | 说明 |
+|---|---|
+| `GET /local/health` | 角色名与语音开关状态 |
+| `GET /local/history` | 全部记录，角色那几条附带切分结果 |
+| `POST /local/chat` | `{"text": "…"}`，阻塞到生成完成 |
+| `POST /local/clear` | 归档当前记忆 |
+| `POST /local/speak` | `{"text": "…"}`，返回 wav 字节 |
+
+来源非回环、Host 头不是 `127.0.0.1`/`localhost`、带 `Origin` 头的请求一律 403。
 
 ## 触发方式
 
