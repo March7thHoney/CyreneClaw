@@ -7,6 +7,7 @@ import { loadCard } from '../prompt/card.js';
 import { baseChatReplace } from '../prompt/macros.js';
 import { stripComments, redact } from '../format/strip.js';
 import { extractDialogue } from '../format/dialogue.js';
+import { imageConfig, imageMarker } from '../discord/images.js';
 
 const log = createLogger('turn');
 
@@ -15,6 +16,22 @@ export function renderUserContent(entry) {
     if (!entry.replyTo) return entry.content;
     const body = entry.replyTo.body.length > 200 ? entry.replyTo.body.slice(0, 200) + '…' : entry.replyTo.body;
     return `<reply_to speaker="${entry.replyTo.name}">${body}</reply_to>\n${entry.content}`;
+}
+
+// 从最新一条往回分配图片配额，超额或文件已丢失的换成文字标记
+export function applyImageBudget(history, { dataDir, maxPerRequest }) {
+    let remaining = maxPerRequest;
+    for (let i = history.length - 1; i >= 0; i--) {
+        const m = history[i];
+        if (!m.images?.length) continue;
+        const alive = m.images.filter((img) => fs.existsSync(path.join(dataDir, img.file)));
+        const keep = alive.slice(0, Math.max(0, remaining));
+        remaining -= keep.length;
+        const dropped = m.images.length - keep.length;
+        if (keep.length) m.images = keep; else delete m.images;
+        if (dropped > 0) m.content = m.content ? `${m.content}\n${imageMarker(dropped)}` : imageMarker(dropped);
+    }
+    return history;
 }
 
 function dumpPrompt(cfg, scope, messages, raw, dialogue) {
@@ -49,13 +66,15 @@ export async function runTurn({ cfg, store, bridge, scope, batch, ambient = null
         role: m.role,
         // 送回模型前剥掉自查注释，与酒馆的 isPrompt 行为一致
         content: m.role === 'assistant' ? stripComments(m.content) : renderUserContent(m),
+        ...(m.role === 'user' && m.images?.length ? { images: m.images } : {}),
     }));
 
     const greeting = seedGreeting({ cfg, store, scope, card, history });
     if (greeting && onGreeting) await onGreeting(greeting);
 
     // 连打的几条并成一个 user turn
-    const merged = batch.map((b) => b.content).join('\n');
+    const merged = batch.map((b) => b.content).filter(Boolean).join('\n');
+    const images = batch.flatMap((b) => b.images || []);
     const userEntry = {
         id: batch[batch.length - 1].id,
         role: 'user',
@@ -63,9 +82,11 @@ export async function runTurn({ cfg, store, bridge, scope, batch, ambient = null
         content: merged,
         ts: Date.now(),
         ...(batch[0].replyTo ? { replyTo: batch[0].replyTo } : {}),
+        ...(images.length ? { images } : {}),
     };
     store.append(scope, userEntry);
-    history.push({ role: 'user', content: renderUserContent(userEntry) });
+    history.push({ role: 'user', content: renderUserContent(userEntry), ...(images.length ? { images } : {}) });
+    applyImageBudget(history, { dataDir: cfg.chat.dataDir, maxPerRequest: imageConfig(cfg).maxPerRequest });
 
     const { messages, stats } = buildMessages({ cfg, history, ambient, withContract });
     log.info('开始生成', { scope: scope.key, 世界书: stats.wiActivated, 历史: history.length });

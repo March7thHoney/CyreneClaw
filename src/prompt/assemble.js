@@ -8,6 +8,9 @@ import { buildDialogueExamples } from './examples.js';
 import { squashSystemMessages, strictMerge } from './postprocess.js';
 import { countTokens, countMessagesTokens } from './tokens.js';
 
+// 出口只保留 role、content 与图片清单
+const project = ({ role, content, images }) => (images?.length ? { role, content, images } : { role, content });
+
 const MARKERS = new Set([
     'personaDescription', 'charDescription', 'charPersonality', 'scenario',
     'dialogueExamples', 'worldInfoBefore', 'worldInfoAfter', 'chatHistory',
@@ -99,7 +102,7 @@ export function buildMessages({ cfg, history, ambient = null, withContract = tru
     const tail = pre.slice(historyIndex);
 
     // 聊天记录本体
-    let chatMsgs = history.map((m) => ({ role: m.role, content: m.content }));
+    let chatMsgs = history.map(project);
 
     // 深度注入：D0 放世界书条目，再接 Discord 契约；D1 放频道背景
     const injections = [];
@@ -131,10 +134,10 @@ export function buildMessages({ cfg, history, ambient = null, withContract = tru
     const squashed = cfg.prompt.squashSystemMessages ? squashSystemMessages(assembled) : assembled;
     const messages = cfg.prompt.postProcessing === 'strict'
         ? strictMerge(squashed, { charName, userName, placeholder: cfg.prompt.promptPlaceholder })
-        : squashed.map(({ role, content }) => ({ role, content }));
+        : squashed.map(project);
 
     return {
-        messages: messages.map(({ role, content }) => ({ role, content })),
+        messages: messages.map(project),
         stats: {
             wiActivated: wi.activated.length,
             wiTokens: wi.tokens,

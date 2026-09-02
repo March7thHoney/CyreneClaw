@@ -20,6 +20,13 @@
       "enabled": true,
       "replyEveryN": 10
     },
+    "images": {
+      "enabled": true,
+      "maxPerMessage": 4,
+      "maxBytes": 10485760,
+      "maxPerRequest": 6,
+      "retentionDays": 7
+    },
     "schedule": [
       {
         "enabled": false,

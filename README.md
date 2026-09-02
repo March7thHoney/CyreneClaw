@@ -43,6 +43,11 @@ cp config.example.json config.json
 | `discord.guilds` | 允许的服务器，每个可单独设 `requireMention`、`replyEveryN` |
 | `discord.cadence.enabled` | 群聊节奏总开关，关闭后仅 @ 或回复触发 |
 | `discord.cadence.replyEveryN` | 你在一个频道里连说多少条没被回应的话，角色强制回一次 |
+| `discord.images.enabled` | 图片输入总开关 |
+| `discord.images.maxPerMessage` | 单条消息最多读取的图片数，默认 4 |
+| `discord.images.maxBytes` | 单张图片的字节上限，默认 10 MB |
+| `discord.images.maxPerRequest` | 每次生成最多附带的图片数，默认 6 |
+| `discord.images.retentionDays` | 图片文件的保留天数，默认 7 |
 | `discord.schedule` | 定时消息，最多 5 条，文字、表情或贴纸，见下文 |
 | `localChat.port` | 本机聊天服务的回环端口，缺省 5610 |
 | `sillytavern.dataDir` | 酒馆的 `data/default-user` 目录 |
@@ -153,6 +158,7 @@ Discord 连不上时本机聊天照常可用。
 | 私聊 | 直接说话即可 |
 | 服务器频道 | @ 机器人，或回复它自己的消息 |
 | 服务器频道（节奏） | 你连说满 `replyEveryN` 条没被回应的话（默认 10），第 N 条强制触发 |
+| 纯图片消息 | 与文字消息相同，以上三种场景均可触发 |
 | 清空当前频道记忆 | 斜杠命令 `/清空`（旧记录归档保留） |
 
 服务器频道里其他人的发言作为现场氛围注入上下文，机器人只回应主人。
@@ -161,6 +167,19 @@ Discord 连不上时本机聊天照常可用。
 `/清空` 也清零。计数只在内存里，重启归零。节奏触发的那一轮与普通一轮相同：
 第 N 条就是这轮的输入，之前被跳过的话和其他人的发言已经在现场氛围里。
 某个服务器想用不同的阈值，在它的 `discord.guilds` 条目里加 `replyEveryN` 即可覆盖全局值。
+
+## 图片输入
+
+消息里的 png、jpeg、gif、webp 附件随正文一起进入对话，私聊、@ 触发与节奏触发三条路径相同。
+单条消息最多读取 `maxPerMessage` 张，超过 `maxBytes` 的跳过。回复一条带图的消息时，被回复的图片一并带入本轮。
+
+图片下载到 `chat.dataDir/images/<scope>/<消息ID>-<序号>.<ext>`，聊天记录里只存路径。
+每次生成从最新一条往前最多附带 `maxPerRequest` 张，其余在该条正文末尾以 `[图片×n]` 标记。
+频道氛围里带图的发言同样以 `[图片×n]` 标记。
+超过 `retentionDays` 的图片文件在启动时与每 6 小时的清理中删除，文件缺失的图片退化为文字标记。
+
+bridge 收到的是 OpenAI 格式的 `image_url` 内容块，落盘后由 CLI 用 Read 工具读取，每张图一次工具调用。
+bridge 的 `logPrompts` 开启时，其请求日志包含图片的 base64 内容。
 
 ## 定时消息
 

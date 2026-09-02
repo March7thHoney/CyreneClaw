@@ -14,7 +14,7 @@ const CONCURRENCY = 5;
 // 顶层 undici 7 不能复用 rest 内嵌的 dispatcher，代理得自己建一个
 let agent;
 let agentReady = false;
-function proxyAgent(proxy) {
+export function proxyAgent(proxy) {
     if (!agentReady) { agent = proxy ? new ProxyAgent(proxy) : undefined; agentReady = true; }
     return agent;
 }

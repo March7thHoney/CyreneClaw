@@ -20,13 +20,17 @@ export function squashSystemMessages(messages) {
     return out;
 }
 
-// 同 role 相邻消息用空行合并
+// 同 role 相邻消息用空行合并，图片清单跟着并入
 function mergeSameRole(messages) {
     const out = [];
     for (const m of messages) {
         const prev = out[out.length - 1];
-        if (prev && prev.role === m.role && m.content) prev.content += '\n\n' + m.content;
-        else out.push({ ...m });
+        if (prev && prev.role === m.role && (m.content || m.images?.length)) {
+            if (m.content) prev.content = prev.content ? prev.content + '\n\n' + m.content : m.content;
+            if (m.images?.length) prev.images = [...(prev.images || []), ...m.images];
+        } else {
+            out.push({ ...m });
+        }
     }
     return out;
 }

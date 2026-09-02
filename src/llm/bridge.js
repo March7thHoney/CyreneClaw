@@ -1,11 +1,13 @@
 // st-claude-cli-bridge 的 OpenAI 兼容客户端，非流式
 import { createLogger } from '../logger.js';
+import { materializeImages } from './parts.js';
 
 const log = createLogger('llm');
 
 export class BridgeClient {
     constructor(cfg) {
         this.cfg = cfg.llm;
+        this.dataDir = cfg.chat?.dataDir || './data';
         this.queue = Promise.resolve();
     }
 
@@ -22,7 +24,7 @@ export class BridgeClient {
             const url = this.cfg.baseUrl.replace(/\/$/, '') + '/chat/completions';
             const body = {
                 model: this.cfg.model,
-                messages,
+                messages: materializeImages(messages, this.dataDir),
                 stream: true,
                 max_tokens: this.cfg.maxTokens ?? 8192,
             };
@@ -76,7 +78,7 @@ export class BridgeClient {
             const url = this.cfg.baseUrl.replace(/\/$/, '') + '/chat/completions';
             const body = {
                 model: this.cfg.model,
-                messages,
+                messages: materializeImages(messages, this.dataDir),
                 stream: false,
                 max_tokens: this.cfg.maxTokens ?? 8192,
             };

@@ -39,4 +39,9 @@ export class Cadence {
     }
 
     reset(channelId) { this.counters.delete(channelId); }
+
+    // 节奏已触发但这一轮没能成行，把计数退回到再来一条就触发的位置
+    refund(channelId, guildId) {
+        if (this.enabled) this.counters.set(channelId, Math.max(0, this.thresholdFor(guildId) - 1));
+    }
 }

@@ -13,6 +13,7 @@ import { reactToTrigger } from './discord/reaction.js';
 import { buildCommandData, handleClear } from './discord/commands.js';
 import { Scheduler } from './discord/schedule.js';
 import { createDirectoryRefresher } from './discord/directory.js';
+import { imageConfig, pickImages, downloadImages, imageMarker, startImageRetention } from './discord/images.js';
 import { ChatStore } from './chat/store.js';
 import { SessionManager } from './chat/session.js';
 import { runTurn, commitReply } from './chat/turn.js';
@@ -39,6 +40,7 @@ const cadence = new Cadence(cfg);
 const bridge = new BridgeClient(cfg);
 const { client, djs } = createClient(cfg);
 const voice = new VoiceMessenger({ cfg, client, djs });
+startImageRetention(cfg);
 
 let emptyContentStreak = 0;
 
@@ -142,6 +144,10 @@ client.on('messageCreate', async (message) => {
             emptyContentStreak = 0;
         }
 
+        // 图片附件先只看元数据，下载留到门禁与节奏判定之后
+        const imgCfg = imageConfig(cfg);
+        const eligible = pickImages(message, imgCfg);
+
         // 先收进现场氛围，再判权限，否则角色看不到别人在聊什么
         if (message.guildId && !message.author?.bot) {
             ambient.record(message.channelId, {
@@ -150,22 +156,25 @@ client.on('messageCreate', async (message) => {
                 author: message.author.id === cfg.discord.owner.userId
                     ? cfg.discord.owner.displayName
                     : (message.member?.displayName || message.author.username),
-                content: message.content,
+                content: [message.content, eligible.length ? imageMarker(eligible.length) : ''].filter(Boolean).join(' '),
                 ts: message.createdTimestamp,
             });
         }
 
         let repliedToBot = false;
         let replyTo = null;
+        let refImages = [];
         if (message.reference?.messageId) {
             try {
                 const ref = await message.fetchReference();
                 repliedToBot = ref.author?.id === client.user?.id;
-                if (ref.content) {
+                // 被引用的图片一并带进本轮，机器人自己的消息里没有图
+                refImages = repliedToBot ? [] : pickImages(ref, imgCfg);
+                if (ref.content || refImages.length) {
                     replyTo = {
                         name: repliedToBot ? loadCard(cfg.sillytavern.characterPath).name
                             : (ref.member?.displayName || ref.author?.username || '某人'),
-                        body: repliedToBot ? stripComments(ref.content) : ref.content,
+                        body: ref.content ? (repliedToBot ? stripComments(ref.content) : ref.content) : '[图片]',
                     };
                 }
             } catch { /* 取不到被引用的消息就当没有 */ }
@@ -173,24 +182,34 @@ client.on('messageCreate', async (message) => {
 
         const verdict = decide(message, { cfg, botId: client.user?.id, repliedToBot });
         const content = stripMentions(message.content, client.user?.id);
+        // 被引用消息的图不单独算输入
+        const hasInput = Boolean(content) || eligible.length > 0;
 
         if (verdict.act === 'reply') {
             // 正常触发的一轮把节奏清零，重新从头数
             cadence.reset(message.channelId);
-        } else if (!verdict.cadence || !content || !cadence.bump(message.channelId, message.guildId)) {
-            // 无正文的消息本来就发不出回复，不能让它白吃一格计数
+        } else if (!verdict.cadence || !hasInput || !cadence.bump(message.channelId, message.guildId)) {
+            // 既无正文也无图片的消息发不出回复，不能让它白吃一格计数
             return;
         }
 
-        if (!content) return;
+        if (!hasInput) return;
 
         const scope = scopeOf(message);
+        const images = await downloadImages([...eligible, ...refImages], { scope, dataDir: cfg.chat.dataDir, proxy: cfg.discord.proxy });
+        if (!content && !images.length) {
+            if (verdict.act !== 'reply') cadence.refund(message.channelId, message.guildId);
+            log.warn('图片全部下载失败且无正文，跳过', { id: message.id });
+            return;
+        }
+
         sessions.enqueue(scope, {
             id: message.id,
             content,
             authorName: message.member?.displayName || message.author.username,
             channel: message.channel,
             replyTo,
+            ...(images.length ? { images } : {}),
         });
     } catch (err) {
         log.error('消息处理异常', { err: err?.message });
