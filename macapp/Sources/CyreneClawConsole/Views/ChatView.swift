@@ -73,6 +73,9 @@ struct ChatView: View {
                 .padding(.vertical, 4)
             }
             .scrollIndicators(.never)
+            // 切 tab 会重建本视图，新建时直接落在底部
+            .defaultScrollAnchor(.bottom)
+            .onAppear { DispatchQueue.main.async { scroll(proxy) } }
             .onChange(of: chat.messages.count) { scroll(proxy) }
             .onChange(of: chat.sending) { scroll(proxy) }
             .onChange(of: chat.streaming?.text) { scroll(proxy) }
