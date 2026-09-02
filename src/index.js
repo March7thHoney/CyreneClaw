@@ -11,6 +11,7 @@ import { startTyping } from './discord/typing.js';
 import { sendText } from './discord/send.js';
 import { reactToTrigger } from './discord/reaction.js';
 import { buildCommandData, handleClear } from './discord/commands.js';
+import { buildToolCommandData, handleToolCommand, TOOL_COMMANDS } from './discord/tools.js';
 import { Scheduler } from './discord/schedule.js';
 import { createDirectoryRefresher } from './discord/directory.js';
 import { imageConfig, pickImages, downloadImages, imageMarker, startImageRetention } from './discord/images.js';
@@ -109,9 +110,10 @@ client.once('clientReady', async (c) => {
     refreshDirectory();
     for (const [id, g] of c.guilds.cache) log.info(`  所在服务器：${g.name} (${id})`);
     try {
-        const data = buildCommandData(djs, cfg.discord.clearCommandName || 'clear');
-        await c.application.commands.set([data]);
-        log.info(`斜杠命令已注册：/${data.name}`);
+        const clear = buildCommandData(djs, cfg.discord.clearCommandName || 'clear');
+        const tools = buildToolCommandData(djs);
+        await c.application.commands.set([clear, ...tools]);
+        log.info(`命令已注册：/${clear.name}, ${tools.map((t) => t.name).join(', ')}`);
     } catch (e) {
         log.error('斜杠命令注册失败', { err: e?.message });
     }
@@ -124,6 +126,14 @@ for (const event of ['guildCreate', 'guildDelete', 'guildUpdate', 'channelCreate
 }
 
 client.on('interactionCreate', async (interaction) => {
+    if (interaction.isMessageContextMenuCommand?.() && TOOL_COMMANDS[interaction.commandName]) {
+        try {
+            await handleToolCommand(interaction, TOOL_COMMANDS[interaction.commandName], { cfg, bridge, djs });
+        } catch (e) {
+            log.error('右键命令失败', { name: interaction.commandName, err: e?.message });
+        }
+        return;
+    }
     if (!interaction.isChatInputCommand()) return;
     if (interaction.commandName !== (cfg.discord.clearCommandName || 'clear')) return;
     try {
