@@ -167,3 +167,57 @@ private struct PanelEmpty: View {
             .padding(.vertical, 24)
     }
 }
+
+// 已选表情池：缩略图网格，悬停出叉号删除，清单里找不到的项显示失效占位
+struct ExpressionPoolGrid: View {
+    let keys: [String]
+    let directory: DiscordDirectory
+    let dataDir: URL?
+    let onRemove: (String) -> Void
+
+    private func lookup(_ key: String) -> (image: String, name: String)? {
+        for g in directory.guilds {
+            if let e = g.emojis.first(where: { $0.token == key }) { return (e.image, ":\(e.name):") }
+            if let s = g.stickers.first(where: { $0.id == key }) { return (s.image, s.name) }
+        }
+        return nil
+    }
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 56), spacing: 8)], alignment: .leading, spacing: 8) {
+            ForEach(keys, id: \.self) { key in
+                let hit = lookup(key)
+                ExpressionPoolCell(dataDir: dataDir, image: hit?.image ?? "", name: hit?.name ?? "已失效") { onRemove(key) }
+            }
+        }
+    }
+}
+
+private struct ExpressionPoolCell: View {
+    let dataDir: URL?
+    let image: String
+    let name: String
+    let onRemove: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            ExpressionThumb(dataDir: dataDir, path: image, side: 48)
+                .padding(4)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.6)))
+            if hovering {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.bad)
+                        .background(Circle().fill(.white))
+                }
+                .buttonStyle(.plain)
+                .offset(x: 4, y: -4)
+            }
+        }
+        .help(name)
+        .onHover { hovering = $0 }
+    }
+}

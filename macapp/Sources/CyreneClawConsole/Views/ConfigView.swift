@@ -12,6 +12,8 @@ struct ConfigView: View {
     @State private var modelName = ""
     @State private var schedule = ScheduleEntry.emptySlots
     @State private var reaction: [String: String] = [:]
+    @State private var expressions: [String] = []
+    @State private var expressionGuild = ""
     @State private var hydrated = false
     @State private var saving = false
     @State private var saved = false
@@ -22,7 +24,7 @@ struct ConfigView: View {
             || dmEnabled != c.dmEnabled || cadenceEnabled != c.cadenceEnabled
             || replyEveryN != c.replyEveryN || voiceEnabled != c.voiceEnabled
             || modelName != c.model || !ScheduleEntry.sameStored(schedule, c.schedule)
-            || reaction != c.reaction
+            || reaction != c.reaction || expressions != c.expressions
     }
 
     var body: some View {
@@ -31,6 +33,7 @@ struct ConfigView: View {
             cadenceSection.fadeUp(step: 3)
             scheduleSection.fadeUp(step: 3)
             reactionSection.fadeUp(step: 3)
+            expressionSection.fadeUp(step: 3)
             HStack(alignment: .top, spacing: 14) {
                 modelSection
                 voiceSection
@@ -157,6 +160,57 @@ struct ConfigView: View {
         }
     }
 
+    private var expressionGuildValue: DirGuild? {
+        model.directory.guild(id: expressionGuild) ?? model.directory.guilds.first
+    }
+
+    private func addExpression(_ key: String) {
+        guard !expressions.contains(key), expressions.count < 50 else { return }
+        expressions.append(key)
+    }
+
+    private var expressionSection: some View {
+        section("本机聊天表情包", icon: "face.smiling.inverse") {
+            if !expressions.isEmpty {
+                ExpressionPoolGrid(keys: expressions, directory: model.directory, dataDir: model.config.dataDir) { key in
+                    expressions.removeAll { $0 == key }
+                }
+            }
+            if model.directory.isEmpty {
+                Text("表情、贴纸的清单由在线的机器人生成，启动机器人后可选。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.warn)
+            } else {
+                HStack(spacing: 10) {
+                    Picker("", selection: $expressionGuild) {
+                        ForEach(model.directory.guilds) { Text($0.name).tag($0.id) }
+                    }
+                    .pickerStyle(.menu).labelsHidden().frame(width: 200)
+                    ExpressionPickButton(dataDir: model.config.dataDir, label: "添加表情", picked: false, image: "") { dismiss in
+                        EmojiPickerPanel(dataDir: model.config.dataDir, emojis: expressionGuildValue?.emojis ?? []) { e in
+                            addExpression(e.token)
+                            dismiss()
+                        }
+                    }
+                    .frame(width: 140)
+                    ExpressionPickButton(dataDir: model.config.dataDir, label: "添加贴纸", picked: false, image: "") { dismiss in
+                        StickerPickerPanel(dataDir: model.config.dataDir, stickers: expressionGuildValue?.stickers ?? []) { s in
+                            addExpression(s.id)
+                            dismiss()
+                        }
+                    }
+                    .frame(width: 140)
+                    Spacer()
+                }
+                .onAppear { if expressionGuild.isEmpty { expressionGuild = model.directory.guilds.first?.id ?? "" } }
+            }
+
+            Text("本机聊天里每条回复发完后，从这个池子里均匀随机附一张，最多 50 张。列表为空即不附。")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.inkDesc)
+        }
+    }
+
     private var modelSection: some View {
         section("模型", icon: "cpu") {
             field("模型") {
@@ -209,6 +263,7 @@ struct ConfigView: View {
         modelName = c.model
         schedule = c.schedule
         reaction = c.reaction
+        expressions = c.expressions
         saved = false
     }
 
@@ -236,6 +291,7 @@ struct ConfigView: View {
                     ]
                 },
                 "discord.reaction": reaction,
+                "localChat.expressions": expressions,
             ])
             saving = false
             guard model.lastError == nil else { return }

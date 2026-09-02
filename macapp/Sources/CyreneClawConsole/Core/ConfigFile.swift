@@ -62,6 +62,8 @@ struct ConsoleConfig {
     var schedule = ScheduleEntry.emptySlots
     // 服务器 ID → 表情 token，缺席即不反应
     var reaction: [String: String] = [:]
+    // 本机聊天每条回复后随机附一张：表情 token 或贴纸 ID
+    var expressions: [String] = []
     var tokenConfigured = false
 
     // 探活与清单文件用，不开放编辑
@@ -123,6 +125,7 @@ enum ConfigStore {
         c.model = v["llm.model"]?.string ?? ""
         c.schedule = parseSchedule(v["discord.schedule"]?.array)
         c.reaction = parseReaction(v["discord.reaction"]?.object)
+        c.expressions = (v["localChat.expressions"]?.array ?? []).compactMap { $0.string }
         c.tokenConfigured = resp.tokenConfigured ?? false
         readEndpoints(root: root, into: &c)
         return c

@@ -84,8 +84,8 @@ export async function runTurn({ cfg, store, bridge, scope, batch, ambient = null
 }
 
 // 模型原文入库，动作描写要留在记忆里
-export function commitReply({ store, scope, card, raw, sent = [] }) {
-    const entry = { id: `gen-${Date.now()}`, role: 'assistant', name: card.name, content: raw, ts: Date.now(), sent };
+export function commitReply({ store, scope, card, raw, sent = [], extra = {} }) {
+    const entry = { id: `gen-${Date.now()}`, role: 'assistant', name: card.name, content: raw, ts: Date.now(), sent, ...extra };
     store.append(scope, entry);
     return entry;
 }

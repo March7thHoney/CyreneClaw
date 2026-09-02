@@ -99,6 +99,10 @@ struct ChatView: View {
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 8) {
                     ChatBubble(message: m)
+                    if let ex = m.expression {
+                        ExpressionThumb(dataDir: model.config.dataDir, path: ex.image, side: ex.isSticker ? 120 : 48)
+                            .help(ex.name)
+                    }
                     if m.hasVoice == true || chat.pendingVoiceId == m.id {
                         VoiceBar(pending: chat.pendingVoiceId == m.id,
                                  playing: chat.speakingId == m.id,

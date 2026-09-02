@@ -111,7 +111,8 @@
     "maxConcurrent": 1
   },
   "localChat": {
-    "port": 5610
+    "port": 5610,
+    "expressions": []
   },
   "chat": {
     "dataDir": "./data",

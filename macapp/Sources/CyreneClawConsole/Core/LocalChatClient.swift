@@ -11,6 +11,16 @@ struct ChatSegment: Decodable, Hashable {
     let text: String
 }
 
+// 回复后附带的那张表情或贴纸，image 是相对 dataDir 的缓存路径
+struct ChatExpression: Decodable, Hashable {
+    let kind: String
+    let id: String
+    let name: String
+    let image: String
+
+    var isSticker: Bool { kind == "sticker" }
+}
+
 struct ChatMessage: Decodable, Identifiable, Hashable {
     let id: String
     let role: String
@@ -19,6 +29,7 @@ struct ChatMessage: Decodable, Identifiable, Hashable {
     let text: String
     var segments: [ChatSegment]?
     var hasVoice: Bool?
+    var expression: ChatExpression?
 
     var isUser: Bool { role == "user" }
 

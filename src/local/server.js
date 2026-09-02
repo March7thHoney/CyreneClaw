@@ -45,7 +45,32 @@ function toMessage(entry, charName, hasVoice = false) {
     const base = { id: entry.id, role: entry.role, name: entry.name || charName, ts: entry.ts || 0 };
     if (entry.role !== 'assistant') return { ...base, text: entry.content };
     const raw = stripComments(entry.content, { dropUnclosed: true });
-    return { ...base, text: raw, segments: segmentText(raw), hasVoice };
+    const msg = { ...base, text: raw, segments: segmentText(raw), hasVoice };
+    if (entry.expression) msg.expression = entry.expression;
+    return msg;
+}
+
+// 从机器人落盘的清单里按 id 找图，清单缺席或已被删掉的项返回 null
+function findExpression(cfg, item) {
+    let dir;
+    try { dir = JSON.parse(fs.readFileSync(path.join(cfg.chat.dataDir, 'discord-directory.json'), 'utf8')); } catch { return null; }
+    for (const g of dir?.guilds || []) {
+        const list = item.kind === 'emoji' ? g.emojis : g.stickers;
+        const hit = (list || []).find((x) => x.id === item.id);
+        if (hit?.image) return { kind: item.kind, id: hit.id, name: hit.name, image: hit.image };
+    }
+    return null;
+}
+
+// 表情池里均匀随机抽一张，抽到失效项就再来，最多三次
+function pickExpression(cfg) {
+    const pool = cfg.localChat.expressions || [];
+    if (!pool.length) return null;
+    for (let i = 0; i < 3; i++) {
+        const hit = findExpression(cfg, pool[Math.floor(Math.random() * pool.length)]);
+        if (hit) return hit;
+    }
+    return null;
 }
 
 export function createLocalServer({ cfg, store, bridge, voice, sessions }) {
@@ -104,8 +129,9 @@ export function createLocalServer({ cfg, store, bridge, voice, sessions }) {
                     push('delta', { text: full, segments: segmentText(stripComments(full, { dropUnclosed: false })) });
                 },
             });
-            const entry = commitReply({ store, scope: LOCAL_SCOPE, card, raw });
-            log.info('已回复', { 字数: raw.length });
+            const expression = pickExpression(cfg);
+            const entry = commitReply({ store, scope: LOCAL_SCOPE, card, raw, extra: expression ? { expression } : {} });
+            log.info('已回复', { 字数: raw.length, 表情: expression?.name });
             return { entry, message: toMessage(entry, card.name) };
         })().then((v) => ({ ok: true, v }), (e) => ({ ok: false, e })));
 

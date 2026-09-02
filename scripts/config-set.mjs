@@ -19,6 +19,7 @@ const ALLOW = {
     'llm.model': { type: 'string', test: (v) => /^[\w.:@/\[\]-]{1,128}$/.test(v), hint: '模型名只能含字母数字与 . : @ / - _ [ ]' },
     'discord.schedule': { type: 'array' },
     'discord.reaction': { type: 'object' },
+    'localChat.expressions': { type: 'expressions' },
 };
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -69,6 +70,22 @@ function validateReaction(map) {
         if (typeof v !== 'string') throw new Error(`服务器 ${k} 的表情格式不对`);
         if (v && !EMOJI_RE.test(v)) throw new Error(`服务器 ${k}：表情要写成 <:名字:ID> 或 <a:名字:ID>`);
     }
+}
+
+const EXPRESSIONS_MAX = 50;
+
+// 本机聊天表情池：每项是 <:名字:ID> 表情或贴纸 ID
+function validateExpressions(list) {
+    if (!Array.isArray(list)) throw new Error('必须是数组');
+    if (list.length > EXPRESSIONS_MAX) throw new Error(`最多 ${EXPRESSIONS_MAX} 项`);
+    const seen = new Set();
+    list.forEach((v, i) => {
+        const at = `第 ${i + 1} 项`;
+        if (typeof v !== 'string') throw new Error(`${at}的格式不对`);
+        if (!EMOJI_RE.test(v) && !CHANNEL_RE.test(v)) throw new Error(`${at}：要写成 <:名字:ID> 表情或 17-20 位数字的贴纸 ID`);
+        if (seen.has(v)) throw new Error(`${at}重复了`);
+        seen.add(v);
+    });
 }
 
 const BOOL_TRUE = new Set(['true', '1', 'yes', 'on']);
@@ -123,6 +140,7 @@ function validate(key, value) {
     if (!spec) throw new Error('不是允许修改的配置项');
     if (spec.type === 'array') return validateSchedule(value);
     if (spec.type === 'object') return validateReaction(value);
+    if (spec.type === 'expressions') return validateExpressions(value);
     if (spec.type === 'bool' && typeof value !== 'boolean') throw new Error('必须是布尔值');
     if (spec.type === 'int' && !Number.isInteger(value)) throw new Error('必须是整数');
     if ((spec.type === 'string' || spec.type === 'enum') && typeof value !== 'string') throw new Error('必须是字符串');

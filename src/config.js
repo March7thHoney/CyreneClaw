@@ -84,9 +84,31 @@ function normalizeVoice(cfg) {
     }
 }
 
+const CHANNEL_RE = /^\d{17,20}$/;
+const EMOJI_RE = /^<a?:[A-Za-z0-9_~]{2,32}:\d{17,20}>$/;
+const EXPRESSIONS_MAX = 50;
+
+// 本机聊天每条回复后随机附一张的表情池：写坏一项只丢这一项
+function normalizeExpressions(raw) {
+    const kept = [];
+    const seen = new Set();
+    (Array.isArray(raw) ? raw : []).forEach((item, i) => {
+        const at = `localChat.expressions 第 ${i + 1} 项`;
+        if (kept.length >= EXPRESSIONS_MAX) { console.warn(`${at}超出 ${EXPRESSIONS_MAX} 项上限，已跳过`); return; }
+        const t = String(item ?? '').trim();
+        if (!t || seen.has(t)) return;
+        if (EMOJI_RE.test(t)) kept.push({ kind: 'emoji', id: t.slice(t.lastIndexOf(':') + 1, -1), token: t });
+        else if (CHANNEL_RE.test(t)) kept.push({ kind: 'sticker', id: t, token: t });
+        else { console.warn(`${at}既不是 <:名字:ID> 表情也不是贴纸 ID，已跳过：${t}`); return; }
+        seen.add(t);
+    });
+    return kept;
+}
+
 // 本机聊天的回环服务，端口不进界面，缺省即可用
 function normalizeLocalChat(cfg) {
     const l = { port: 5610, ...(cfg.localChat || {}) };
+    l.expressions = normalizeExpressions(l.expressions);
     const port = Number(l.port);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) {
         console.warn(`localChat.port 不是 1024-65535 的整数，已改用 5610：${l.port}`);
@@ -99,8 +121,6 @@ function normalizeLocalChat(cfg) {
 
 const SCHEDULE_MAX = 5;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
-const CHANNEL_RE = /^\d{17,20}$/;
-const EMOJI_RE = /^<a?:[A-Za-z0-9_~]{2,32}:\d{17,20}>$/;
 const SCHEDULE_KINDS = new Set(['text', 'emoji', 'sticker']);
 
 // 定时消息与语音同理：写坏一条只丢这一条，绝不能挡住机器人登录
@@ -194,6 +214,12 @@ export function applyHotConfig(cfg, next) {
         cfg.discord.schedule = raw;
         normalizeSchedule(cfg);
         if (JSON.stringify(cfg.discord.schedule) !== before) changed.push('discord.schedule');
+    }
+    const rawExpr = pick(next, 'localChat.expressions');
+    if (rawExpr !== undefined) {
+        const before = JSON.stringify(cfg.localChat.expressions);
+        cfg.localChat.expressions = normalizeExpressions(rawExpr);
+        if (JSON.stringify(cfg.localChat.expressions) !== before) changed.push('localChat.expressions');
     }
     const rawReaction = pick(next, 'discord.reaction');
     if (rawReaction !== undefined) {
