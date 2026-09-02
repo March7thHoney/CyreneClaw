@@ -69,11 +69,16 @@ async function fetchTo(url, dest, dispatcher) {
     await fs.promises.rename(tmp, dest);
 }
 
+// 图片目录：<dataDir>/images/<scope.key>/
+function imageDir(dataDir, scope) {
+    const relDir = path.posix.join('images', ...scope.key.split('/'));
+    return { relDir, dir: path.join(dataDir, ...relDir.split('/')) };
+}
+
 // 落盘到 <dataDir>/images/<scope.key>/<消息ID>-<序号>.<ext>，已存在的直接复用
 export async function downloadImages(picked, { scope, dataDir, proxy }) {
     if (!picked.length) return [];
-    const relDir = path.posix.join('images', ...scope.key.split('/'));
-    const dir = path.join(dataDir, ...relDir.split('/'));
+    const { relDir, dir } = imageDir(dataDir, scope);
     await fs.promises.mkdir(dir, { recursive: true });
     const dispatcher = proxyAgent(proxy);
     const results = await Promise.all(picked.map(async (p) => {
@@ -88,6 +93,32 @@ export async function downloadImages(picked, { scope, dataDir, proxy }) {
         }
     }));
     return results.filter(Boolean);
+}
+
+// 本机上传的图片：items 为 { sourceId, index, mime, name, buffer }，按类型与大小筛后落盘
+export async function saveImages(items, { scope, dataDir, imgCfg }) {
+    if (!imgCfg.enabled || !items.length) return [];
+    const { relDir, dir } = imageDir(dataDir, scope);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const out = [];
+    for (const it of items) {
+        if (out.length >= imgCfg.maxPerMessage) break;
+        const mime = String(it.mime || '').split(';')[0].trim().toLowerCase();
+        const ext = IMAGE_MIMES[mime];
+        if (!ext || !it.buffer?.length) continue;
+        if (it.buffer.length > imgCfg.maxBytes) {
+            log.debug('图片超过大小上限，跳过', { name: it.name, size: it.buffer.length });
+            continue;
+        }
+        const base = `${it.sourceId}-${it.index}.${ext}`;
+        try {
+            await fs.promises.writeFile(path.join(dir, base), it.buffer);
+            out.push({ file: path.posix.join(relDir, base), mime, name: it.name || `image.${ext}` });
+        } catch (e) {
+            log.warn('图片写入失败', { name: it.name, err: e?.message });
+        }
+    }
+    return out;
 }
 
 export function imageMarker(n) {

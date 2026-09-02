@@ -8,6 +8,7 @@ import { runTurn, commitReply, seedGreeting } from '../chat/turn.js';
 import { segmentText, extractDialogue } from '../format/dialogue.js';
 import { stripComments } from '../format/strip.js';
 import { loadCard } from '../prompt/card.js';
+import { imageConfig, saveImages } from '../discord/images.js';
 
 const log = createLogger('local');
 const HOST = '127.0.0.1';
@@ -22,13 +23,13 @@ function json(res, code, payload) {
 }
 
 // 请求体超过上限直接掐断，回环服务也不该无限吃内存
-function readBody(req) {
+function readBody(req, limit = MAX_BODY) {
     return new Promise((resolve, reject) => {
         const chunks = [];
         let size = 0;
         req.on('data', (c) => {
             size += c.length;
-            if (size > MAX_BODY) { reject(new Error('请求体过大')); req.destroy(); return; }
+            if (size > limit) { reject(new Error('请求体过大')); req.destroy(); return; }
             chunks.push(c);
         });
         req.on('end', () => {
@@ -43,7 +44,7 @@ function readBody(req) {
 // 存档里的一条转成界面要的形状，角色台词现算分段
 function toMessage(entry, charName, hasVoice = false) {
     const base = { id: entry.id, role: entry.role, name: entry.name || charName, ts: entry.ts || 0 };
-    if (entry.role !== 'assistant') return { ...base, text: entry.content };
+    if (entry.role !== 'assistant') return { ...base, text: entry.content, ...(entry.images?.length ? { images: entry.images } : {}) };
     const raw = stripComments(entry.content, { dropUnclosed: true });
     const msg = { ...base, text: raw, segments: segmentText(raw), hasVoice };
     if (entry.expression) msg.expression = entry.expression;
@@ -99,10 +100,25 @@ export function createLocalServer({ cfg, store, bridge, voice, sessions }) {
         },
     };
 
+    // 图片上传上限：按张数与单张字节数折算 base64 后的体积
+    const chatBodyLimit = () => {
+        const c = imageConfig(cfg);
+        return (c.enabled ? Math.ceil(c.maxPerMessage * c.maxBytes * 4 / 3) : 0) + MAX_BODY;
+    };
+
     // 流式：每帧推一次到目前为止的全文与分段，最后一帧带落库后的完整消息
     async function chat(res, body) {
         const text = String(body?.text ?? '').trim();
-        if (!text) return json(res, 400, { error: '内容为空' });
+        const uploads = Array.isArray(body?.images) ? body.images : [];
+        if (!text && !uploads.length) return json(res, 400, { error: '内容为空' });
+
+        const id = `local-${Date.now()}`;
+        const items = uploads.map((u, i) => ({
+            sourceId: id, index: i, mime: u?.mime, name: u?.name,
+            buffer: typeof u?.data === 'string' ? Buffer.from(u.data, 'base64') : null,
+        }));
+        const images = await saveImages(items, { scope: LOCAL_SCOPE, dataDir: cfg.chat.dataDir, imgCfg: imageConfig(cfg) });
+        if (!text && !images.length) return json(res, 400, { error: '图片无效或超过大小上限' });
 
         res.writeHead(200, {
             'content-type': 'text/event-stream; charset=utf-8',
@@ -114,12 +130,12 @@ export function createLocalServer({ cfg, store, bridge, voice, sessions }) {
             res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         };
 
-        const batch = [{ id: `local-${Date.now()}`, content: text, authorName: cfg.discord.owner.displayName }];
+        const batch = [{ id, content: text, authorName: cfg.discord.owner.displayName, ...(images.length ? { images } : {}) }];
         // 与 Discord 共用同一种串行写法，连点时后一条排队而不是并发
         const outcome = await sessions.runSerial(LOCAL_SCOPE.key, () => (async () => {
             let lastPush = 0;
             // 与 Discord 同一套契约，长度一致，只是描写也显示出来
-            const { card, raw } = await runTurn({
+            const { card, raw, userEntry } = await runTurn({
                 cfg, store, bridge, scope: LOCAL_SCOPE, batch, ambient: null,
                 onDelta: (full) => {
                     // 节流到 80ms，逐 token 重算分段没必要
@@ -131,8 +147,8 @@ export function createLocalServer({ cfg, store, bridge, voice, sessions }) {
             });
             const expression = pickExpression(cfg);
             const entry = commitReply({ store, scope: LOCAL_SCOPE, card, raw, extra: expression ? { expression } : {} });
-            log.info('已回复', { 字数: raw.length, 表情: expression?.name });
-            return { entry, message: toMessage(entry, card.name) };
+            log.info('已回复', { 字数: raw.length, 表情: expression?.name, 图片: images.length });
+            return { entry, message: toMessage(entry, card.name), user: toMessage(userEntry, card.name) };
         })().then((v) => ({ ok: true, v }), (e) => ({ ok: false, e })));
 
         if (!outcome.ok) {
@@ -141,11 +157,11 @@ export function createLocalServer({ cfg, store, bridge, voice, sessions }) {
             return res.end();
         }
 
-        const { entry, message } = outcome.v;
+        const { entry, message, user } = outcome.v;
         const speech = voice.enabled
             ? extractDialogue(entry.content, { joinSeparator: cfg.format.joinSeparator })
             : '';
-        push('done', { message: { ...message, hasVoice: false }, voicePending: Boolean(speech) });
+        push('done', { message: { ...message, hasVoice: false }, user, voicePending: Boolean(speech) });
 
         // 文字先落地，语音好了再补一帧，跟 Discord 上语音条单独成条一个意思
         if (speech) {
@@ -183,7 +199,7 @@ export function createLocalServer({ cfg, store, bridge, voice, sessions }) {
 
         const key = `${req.method} ${req.url.split('?')[0]}`;
         try {
-            const body = req.method === 'POST' ? await readBody(req) : {};
+            const body = req.method === 'POST' ? await readBody(req, key === 'POST /local/chat' ? chatBodyLimit() : MAX_BODY) : {};
             if (key === 'POST /local/chat') return await chat(res, body);
             if (key === 'GET /local/voice') return await voiceFile(req, res);
             const handler = routes[key];

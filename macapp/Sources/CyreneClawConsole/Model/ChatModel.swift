@@ -31,7 +31,44 @@ final class ChatModel: NSObject, ObservableObject {
     private var playFile: URL?
     private var progressTask: Task<Void, Never>?
 
-    var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending && online }
+    // 待发的图片，最多 4 张，与服务端默认的单条上限一致
+    @Published var attachments: [URL] = []
+    static let maxAttachments = 4
+
+    var canSend: Bool {
+        (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty) && !sending && online
+    }
+
+    func addAttachments(_ urls: [URL]) {
+        for u in urls where LocalChatClient.isImage(u) && !attachments.contains(u) {
+            guard attachments.count < Self.maxAttachments else { break }
+            attachments.append(u)
+        }
+    }
+
+    func removeAttachment(_ url: URL) {
+        attachments.removeAll { $0 == url }
+    }
+
+    // 剪贴板里的位图先写成 png 临时文件，再当普通附件处理
+    func addPastedImage(_ image: NSImage) {
+        guard let tiff = image.tiffRepresentation,
+              let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("cyreneclaw-paste-\(Int(Date().timeIntervalSince1970 * 1000)).png")
+        guard (try? png.write(to: url)) != nil else { return }
+        addAttachments([url])
+    }
+
+    func pickImages() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .gif, .webP]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.message = "选择要发送的图片"
+        guard panel.runModal() == .OK else { return }
+        addAttachments(panel.urls)
+    }
 
     // 语音文件所在目录，直接从磁盘播，省掉整条 HTTP 往返
     var voiceDir: URL?
@@ -67,8 +104,10 @@ final class ChatModel: NSObject, ObservableObject {
 
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !sending else { return }
+        let files = attachments
+        guard !text.isEmpty || !files.isEmpty, !sending else { return }
         draft = ""
+        attachments = []
         sending = true
         streaming = nil
         lastError = nil
@@ -78,22 +117,27 @@ final class ChatModel: NSObject, ObservableObject {
         // 自己那条先上屏，等回复的这几十秒里界面才不是空的
         let mine = ChatMessage(id: "local-\(Date().timeIntervalSince1970)", role: "user",
                                name: "我", ts: Date().timeIntervalSince1970 * 1000,
-                               text: text, segments: nil)
+                               text: text, segments: nil,
+                               images: files.isEmpty ? nil : files.map {
+                                   ChatImage(file: $0.path, mime: "", name: $0.lastPathComponent)
+                               })
         messages.append(mine)
 
         Task {
             var pendingId: String?
             defer { if gen == requestGen { sending = false; streaming = nil } }
             do {
-                try await LocalChatClient.chat(origin, text: text, onDelta: { [weak self] full, segs in
+                try await LocalChatClient.chat(origin, text: text, images: files, onDelta: { [weak self] full, segs in
                     guard let self else { return }
                     self.streaming = ChatMessage(id: "streaming", role: "assistant", name: self.charName,
                                                  ts: Date().timeIntervalSince1970 * 1000,
                                                  text: full, segments: segs, hasVoice: false)
-                }, onReply: { [weak self] reply, voicePending in
+                }, onReply: { [weak self] reply, user, voicePending in
                     guard let self else { return }
                     self.streaming = nil
                     self.sending = false
+                    // 服务端存档那条带的是落盘后的图片路径，换掉乐观上屏的那条
+                    if let user, let i = self.messages.firstIndex(where: { $0.id == mine.id }) { self.messages[i] = user }
                     self.messages.append(reply)
                     if voicePending {
                         self.pendingVoiceIds.insert(reply.id)
@@ -114,7 +158,7 @@ final class ChatModel: NSObject, ObservableObject {
                 if pendingId != nil { settleVoice(pendingId); return }
                 // 这一轮没成，把刚上屏的那条收回去，草稿还给用户
                 messages.removeAll { $0.id == mine.id }
-                if gen == requestGen { draft = text }
+                if gen == requestGen { draft = text; attachments = files }
             }
         }
     }

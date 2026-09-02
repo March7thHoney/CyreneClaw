@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // 聊天页：顶栏、消息列表、输入条。不加入场动画，控件全是标准 Button
 struct ChatView: View {
@@ -92,6 +94,8 @@ struct ChatView: View {
         let target: String? = chat.sending ? typingAnchor : chat.messages.last?.id
         guard let target else { return }
         proxy.scrollTo(target, anchor: .bottom)
+        // 带图的行在懒加载里先按估算高度排，等真正铺开后再补滚一次
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { proxy.scrollTo(target, anchor: .bottom) }
     }
 
     @ViewBuilder
@@ -99,7 +103,7 @@ struct ChatView: View {
         if m.isUser {
             HStack(spacing: 0) {
                 Spacer(minLength: 80)
-                UserBubble(message: m).frame(maxWidth: 460, alignment: .trailing)
+                UserBubble(message: m, dataDir: model.config.dataDir).frame(maxWidth: 520, alignment: .trailing)
             }
         } else {
             HStack(spacing: 0) {
@@ -122,20 +126,85 @@ struct ChatView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            ChatInput(text: $chat.draft, enabled: chat.online && !chat.sending) { chat.send() }
-            Button {
-                chat.send()
-            } label: {
-                if chat.sending {
-                    ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 30)
-                } else {
-                    Text("发送").frame(width: 30)
+        VStack(alignment: .leading, spacing: 8) {
+            if !chat.attachments.isEmpty {
+                attachmentStrip
+            }
+            HStack(alignment: .bottom, spacing: 10) {
+                AttachButton { chat.pickImages() }
+                    .disabled(!chat.online || chat.sending || chat.attachments.count >= ChatModel.maxAttachments)
+                ChatInput(text: $chat.draft, enabled: chat.online && !chat.sending,
+                          onSubmit: { chat.send() },
+                          onPasteFiles: { chat.addAttachments($0) },
+                          onPasteImage: { chat.addPastedImage($0) })
+                Button {
+                    chat.send()
+                } label: {
+                    if chat.sending {
+                        ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 30)
+                    } else {
+                        Text("发送").frame(width: 30)
+                    }
+                }
+                .buttonStyle(BrandButtonStyle())
+                .disabled(!chat.canSend)
+            }
+        }
+        // 从访达拖图进来
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            for p in providers {
+                _ = p.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
+                    Task { @MainActor in chat.addAttachments([url]) }
                 }
             }
-            .buttonStyle(BrandButtonStyle())
-            .disabled(!chat.canSend)
+            return true
         }
+    }
+
+    // 待发的图片缩略图，右上角 × 移除
+    private var attachmentStrip: some View {
+        HStack(spacing: 8) {
+            ForEach(chat.attachments, id: \.self) { url in
+                ZStack(alignment: .topTrailing) {
+                    ChatImageGrid(dataDir: model.config.dataDir,
+                                  images: [ChatImage(file: url.path, mime: "", name: url.lastPathComponent)], side: 56)
+                    Button { chat.removeAttachment(url) } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white, Theme.pink600)
+                    }
+                    .buttonStyle(.borderless)
+                    .offset(x: 4, y: -4)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+    }
+}
+
+// 选图按钮：与输入框同高的方块，只放一个图片图标
+private struct AttachButton: View {
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "photo")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(hovered && enabled ? Theme.pink600 : Theme.inkBody)
+                .frame(width: 38, height: 38)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.7)))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color(hex: 0xFCE7F3), lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .opacity(enabled ? 1 : 0.55)
+        .help("发送图片")
     }
 }
 
@@ -144,6 +213,8 @@ private struct ChatInput: View {
     @Binding var text: String
     let enabled: Bool
     let onSubmit: () -> Void
+    let onPasteFiles: ([URL]) -> Void
+    let onPasteImage: (NSImage) -> Void
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -170,6 +241,16 @@ private struct ChatInput: View {
                     if NSEvent.modifierFlags.contains(.shift) { return .ignored }
                     onSubmit()
                     return .handled
+                }
+                // 剪贴板里是文件或位图就当图片附件，纯文字仍由编辑器自己粘
+                .onPasteCommand(of: [.fileURL, .png, .tiff]) { providers in
+                    guard enabled else { return }
+                    let pb = NSPasteboard.general
+                    if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
+                        onPasteFiles(urls)
+                    } else if let img = NSImage(pasteboard: pb) {
+                        onPasteImage(img)
+                    }
                 }
         }
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.7)))

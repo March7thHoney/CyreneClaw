@@ -137,6 +137,8 @@ node scripts/config-set.mjs log.level=debug    # 也可以在终端直接改
 - **语音**：每条回复右上角一个喇叭，点了才合成并在 App 里播放，跟随 `voice.enabled`。
   朗读文本与 Discord 语音条同一条链路，只念台词。
 - **回车发送**，Shift+回车换行。
+- **图片**：「图片」按钮选文件、从访达拖入、或粘贴剪贴板里的图，一条最多 4 张。
+  落盘到 `data/images/local/main/`，张数、大小与保留天数沿用 `discord.images`，过期后气泡里只剩占位块。
 
 服务随机器人进程启动，只听 `127.0.0.1:<localChat.port>`，缺省 5610。
 Discord 连不上时本机聊天照常可用。
@@ -145,7 +147,7 @@ Discord 连不上时本机聊天照常可用。
 |---|---|
 | `GET /local/health` | 角色名与语音开关状态 |
 | `GET /local/history` | 全部记录，角色那几条附带切分结果 |
-| `POST /local/chat` | `{"text": "…"}`，阻塞到生成完成 |
+| `POST /local/chat` | `{"text": "…", "images": [{"name", "mime", "data"}]}`，`data` 为 base64，SSE 流式返回 |
 | `POST /local/clear` | 归档当前记忆 |
 | `POST /local/speak` | `{"text": "…"}`，返回 wav 字节 |
 

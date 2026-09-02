@@ -21,6 +21,13 @@ struct ChatExpression: Decodable, Hashable {
     var isSticker: Bool { kind == "sticker" }
 }
 
+// 用户发的图，file 是相对 dataDir 的路径；乐观上屏那条用绝对路径
+struct ChatImage: Decodable, Hashable {
+    let file: String
+    let mime: String
+    let name: String
+}
+
 struct ChatMessage: Decodable, Identifiable, Hashable {
     let id: String
     let role: String
@@ -30,6 +37,7 @@ struct ChatMessage: Decodable, Identifiable, Hashable {
     var segments: [ChatSegment]?
     var hasVoice: Bool?
     var expression: ChatExpression?
+    var images: [ChatImage]?
 
     var isUser: Bool { role == "user" }
 
@@ -82,7 +90,7 @@ enum LocalChatClient {
 
     private struct ServerError: Decodable { let error: String }
     private struct HistoryResponse: Decodable { let messages: [ChatMessage] }
-    private struct ChatResponse: Decodable { let message: ChatMessage; let voicePending: Bool? }
+    private struct ChatResponse: Decodable { let message: ChatMessage; let user: ChatMessage?; let voicePending: Bool? }
     private struct DeltaFrame: Decodable { let text: String; let segments: [ChatSegment] }
     private struct VoiceFrame: Decodable { let id: String; let error: String? }
     private struct ClearResponse: Decodable { let archived: Bool }
@@ -123,18 +131,37 @@ enum LocalChatClient {
         return try await send(req, HistoryResponse.self, using: session).messages
     }
 
+    static let imageMimes = ["png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"]
+
+    static func isImage(_ url: URL) -> Bool { imageMimes[url.pathExtension.lowercased()] != nil }
+
+    // 图片读成 base64 随请求体一起发，大小与张数由服务端裁决
+    private static func encode(_ urls: [URL]) -> [[String: Any]] {
+        urls.compactMap { url in
+            guard let mime = imageMimes[url.pathExtension.lowercased()],
+                  let data = try? Data(contentsOf: url) else { return nil }
+            return ["name": url.lastPathComponent, "mime": mime, "data": data.base64EncodedString()]
+        }
+    }
+
     // 流式：文字逐帧到 onDelta，落库时 onReply，语音合成完再 onVoice
-    static func chat(_ origin: String, text: String,
+    static func chat(_ origin: String, text: String, images: [URL] = [],
                      onDelta: @escaping (String, [ChatSegment]) -> Void,
-                     onReply: @escaping (ChatMessage, Bool) -> Void,
+                     onReply: @escaping (ChatMessage, ChatMessage?, Bool) -> Void,
                      onVoice: @escaping (String, String?) -> Void) async throws {
-        guard let req = request(origin, "/local/chat", body: ["text": text]) else { throw LocalChatError.noService }
+        var body: [String: Any] = ["text": text]
+        if !images.isEmpty { body["images"] = encode(images) }
+        guard let req = request(origin, "/local/chat", body: body) else { throw LocalChatError.noService }
 
         let bytes: URLSession.AsyncBytes
         let resp: URLResponse
         do { (bytes, resp) = try await session.bytes(for: req) } catch { throw LocalChatError.noService }
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
-            throw LocalChatError.server("服务返回 \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
+            // 非 200 的响应体是一段 JSON，把服务端给的原因带出来
+            var raw = Data()
+            for try await b in bytes { raw.append(b) }
+            let msg = (try? JSONDecoder().decode(ServerError.self, from: raw))?.error
+            throw LocalChatError.server(msg ?? "服务返回 \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
         }
 
         let dec = JSONDecoder()
@@ -149,7 +176,7 @@ enum LocalChatClient {
                 guard let f = try? dec.decode(ChatResponse.self, from: d) else {
                     throw LocalChatError.server("服务返回的内容看不懂")
                 }
-                onReply(f.message, f.voicePending ?? false)
+                onReply(f.message, f.user, f.voicePending ?? false)
                 // 语音还在合成，连接留着等那一帧
                 if f.voicePending != true { return }
             case "voice":

@@ -101,7 +101,7 @@ export async function runTurn({ cfg, store, bridge, scope, batch, ambient = null
     if (hits.length) log.warn('输出命中敏感信息并已过滤', { hits });
 
     dumpPrompt(cfg, scope, messages, raw, dialogue);
-    return { card, raw, stripped, dialogue };
+    return { card, raw, stripped, dialogue, userEntry };
 }
 
 // 模型原文入库，动作描写要留在记忆里

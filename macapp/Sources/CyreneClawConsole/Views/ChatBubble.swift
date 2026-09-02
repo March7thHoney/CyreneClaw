@@ -46,20 +46,52 @@ struct ChatBubble: View {
     }
 }
 
-// 自己那条：右对齐的品牌渐变胶囊
+// 自己那条：右对齐的品牌渐变胶囊，带图时图在上文字在下
 struct UserBubble: View {
     let message: ChatMessage
+    let dataDir: URL?
 
     var body: some View {
-        Text(message.text)
-            .font(.system(size: 13))
-            .foregroundStyle(.white)
-            .lineSpacing(4)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(bubbleShape.fill(Theme.brand))
+        VStack(alignment: .trailing, spacing: 8) {
+            if let imgs = message.images, !imgs.isEmpty {
+                ChatImageGrid(dataDir: dataDir, images: imgs)
+            }
+            if !message.text.isEmpty {
+                Text(message.text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(bubbleShape.fill(Theme.brand))
+    }
+}
+
+// 用户发的图横排，缺图时留一块浅色底
+struct ChatImageGrid: View {
+    let dataDir: URL?
+    let images: [ChatImage]
+    var side: CGFloat = 120
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(images, id: \.self) { img in
+                Group {
+                    if let dataDir, let ns = ExpressionImageCache.shared.image(dataDir: dataDir, path: img.file) {
+                        Image(nsImage: ns).resizable().interpolation(.high).scaledToFill()
+                    } else {
+                        Color.white.opacity(0.35)
+                    }
+                }
+                .frame(width: side, height: side)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .help(img.name)
+            }
+        }
     }
 }
 

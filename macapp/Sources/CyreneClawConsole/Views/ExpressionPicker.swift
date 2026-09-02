@@ -10,7 +10,9 @@ final class ExpressionImageCache {
         guard !path.isEmpty else { return nil }
         let key = path as NSString
         if let hit = cache.object(forKey: key) { return hit }
-        guard let img = NSImage(contentsOf: dataDir.appendingPathComponent(path)) else { return nil }
+        // 绝对路径直接读，相对路径拼在 dataDir 下
+        let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : dataDir.appendingPathComponent(path)
+        guard let img = NSImage(contentsOf: url) else { return nil }
         cache.setObject(img, forKey: key)
         return img
     }
