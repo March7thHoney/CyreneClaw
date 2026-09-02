@@ -18,8 +18,8 @@ final class ChatModel: NSObject, ObservableObject {
 
     // 正在出声的那条，用来把播放键换成停止键
     @Published var speakingId: String?
-    // 语音还在合成的那条，语音条先占位
-    @Published var pendingVoiceId: String?
+    // 语音还在合成的那些条，语音条先占位；连发时可能同时有多条
+    @Published var pendingVoiceIds: Set<String> = []
     // 播放进度 0…1，驱动语音条的填充
     @Published var progress: Double = 0
 
@@ -82,6 +82,7 @@ final class ChatModel: NSObject, ObservableObject {
         messages.append(mine)
 
         Task {
+            var pendingId: String?
             defer { if gen == requestGen { sending = false; streaming = nil } }
             do {
                 try await LocalChatClient.chat(origin, text: text, onDelta: { [weak self] full, segs in
@@ -94,25 +95,45 @@ final class ChatModel: NSObject, ObservableObject {
                     self.streaming = nil
                     self.sending = false
                     self.messages.append(reply)
-                    if voicePending { self.pendingVoiceId = reply.id }
+                    if voicePending {
+                        self.pendingVoiceIds.insert(reply.id)
+                        pendingId = reply.id
+                    }
                 }, onVoice: { [weak self] id, err in
                     guard let self else { return }
-                    if self.pendingVoiceId == id { self.pendingVoiceId = nil }
+                    self.pendingVoiceIds.remove(id)
                     if let err { self.lastError = err; return }
-                    // 语音到了，把那条标成有语音，气泡下面就长出语音条
-                    if let i = self.messages.firstIndex(where: { $0.id == id }) {
-                        self.messages[i].hasVoice = true
-                    }
+                    self.markVoice(id)
                 })
+                settleVoice(pendingId)
                 // 服务端会先补开场白，本地这份要跟着对齐
                 if messages.count == 2, gen == requestGen, !sending { await reload() }
             } catch {
                 lastError = error.localizedDescription
+                // 文字已经落地、只是等语音时断了，不能把这一轮当失败收回
+                if pendingId != nil { settleVoice(pendingId); return }
                 // 这一轮没成，把刚上屏的那条收回去，草稿还给用户
                 messages.removeAll { $0.id == mine.id }
                 if gen == requestGen { draft = text }
             }
         }
+    }
+
+    // 语音到了，把那条标成有语音，气泡下面就长出语音条
+    private func markVoice(_ id: String) {
+        if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].hasVoice = true }
+    }
+
+    // 连接断了却没收到语音帧，就看磁盘上有没有那份 wav 兜底
+    private func settleVoice(_ id: String?) {
+        guard let id, pendingVoiceIds.contains(id) else { return }
+        pendingVoiceIds.remove(id)
+        if voiceFileExists(id) { markVoice(id) }
+    }
+
+    private func voiceFileExists(_ id: String) -> Bool {
+        guard let dir = voiceDir else { return false }
+        return FileManager.default.fileExists(atPath: dir.appendingPathComponent("cyrene-local-\(id).wav").path)
     }
 
     func clear() {

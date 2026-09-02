@@ -77,7 +77,7 @@ struct ChatView: View {
             .onChange(of: chat.sending) { scroll(proxy) }
             .onChange(of: chat.streaming?.text) { scroll(proxy) }
             // 语音条出现或切换会改末行高度，跟着再滚一次
-            .onChange(of: chat.pendingVoiceId) { scroll(proxy) }
+            .onChange(of: chat.pendingVoiceIds) { scroll(proxy) }
             .onChange(of: chat.messages.last?.hasVoice) { scroll(proxy) }
         }
         .frame(maxHeight: .infinity)
@@ -106,8 +106,8 @@ struct ChatView: View {
                         ExpressionThumb(dataDir: model.config.dataDir, path: ex.image, side: ex.isSticker ? 120 : 48)
                             .help(ex.name)
                     }
-                    if m.hasVoice == true || chat.pendingVoiceId == m.id {
-                        VoiceBar(pending: chat.pendingVoiceId == m.id,
+                    if m.hasVoice == true || chat.pendingVoiceIds.contains(m.id) {
+                        VoiceBar(pending: m.hasVoice != true,
                                  playing: chat.speakingId == m.id,
                                  progress: chat.speakingId == m.id ? chat.progress : 0) { chat.speak(m) }
                     }
