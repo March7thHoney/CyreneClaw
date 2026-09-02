@@ -76,6 +76,9 @@ struct ChatView: View {
             .onChange(of: chat.messages.count) { scroll(proxy) }
             .onChange(of: chat.sending) { scroll(proxy) }
             .onChange(of: chat.streaming?.text) { scroll(proxy) }
+            // 语音条出现或切换会改末行高度，跟着再滚一次
+            .onChange(of: chat.pendingVoiceId) { scroll(proxy) }
+            .onChange(of: chat.messages.last?.hasVoice) { scroll(proxy) }
         }
         .frame(maxHeight: .infinity)
     }

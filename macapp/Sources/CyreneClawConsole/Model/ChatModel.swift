@@ -24,6 +24,8 @@ final class ChatModel: NSObject, ObservableObject {
     @Published var progress: Double = 0
 
     private var origin = ""
+    // 轮次号：上一轮等语音的 Task 收尾时，不能碰新一轮的状态
+    private var requestGen = 0
     // 进程内音频栈在这个后台启动的 app 里会被卡住，交给 afplay 子进程放
     private var player: Process?
     private var playFile: URL?
@@ -70,6 +72,8 @@ final class ChatModel: NSObject, ObservableObject {
         sending = true
         streaming = nil
         lastError = nil
+        requestGen += 1
+        let gen = requestGen
 
         // 自己那条先上屏，等回复的这几十秒里界面才不是空的
         let mine = ChatMessage(id: "local-\(Date().timeIntervalSince1970)", role: "user",
@@ -78,7 +82,7 @@ final class ChatModel: NSObject, ObservableObject {
         messages.append(mine)
 
         Task {
-            defer { sending = false; streaming = nil }
+            defer { if gen == requestGen { sending = false; streaming = nil } }
             do {
                 try await LocalChatClient.chat(origin, text: text, onDelta: { [weak self] full, segs in
                     guard let self else { return }
@@ -93,7 +97,7 @@ final class ChatModel: NSObject, ObservableObject {
                     if voicePending { self.pendingVoiceId = reply.id }
                 }, onVoice: { [weak self] id, err in
                     guard let self else { return }
-                    self.pendingVoiceId = nil
+                    if self.pendingVoiceId == id { self.pendingVoiceId = nil }
                     if let err { self.lastError = err; return }
                     // 语音到了，把那条标成有语音，气泡下面就长出语音条
                     if let i = self.messages.firstIndex(where: { $0.id == id }) {
@@ -101,12 +105,12 @@ final class ChatModel: NSObject, ObservableObject {
                     }
                 })
                 // 服务端会先补开场白，本地这份要跟着对齐
-                if messages.count == 2 { await reload() }
+                if messages.count == 2, gen == requestGen, !sending { await reload() }
             } catch {
                 lastError = error.localizedDescription
                 // 这一轮没成，把刚上屏的那条收回去，草稿还给用户
                 messages.removeAll { $0.id == mine.id }
-                draft = text
+                if gen == requestGen { draft = text }
             }
         }
     }
