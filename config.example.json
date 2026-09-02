@@ -64,7 +64,7 @@
       }
     },
     "debounceMs": 1500,
-    "clearCommandName": "清空",
+    "clearCommandName": "clear",
     "replies": {
       "notOwner": "（仅主人可用该命令时的提示语，用角色口吻写）",
       "cleared": "（清空成功时的提示语，用角色口吻写）",

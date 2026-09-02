@@ -109,7 +109,7 @@ client.once('clientReady', async (c) => {
     refreshDirectory();
     for (const [id, g] of c.guilds.cache) log.info(`  所在服务器：${g.name} (${id})`);
     try {
-        const data = buildCommandData(djs, cfg.discord.clearCommandName || '清空');
+        const data = buildCommandData(djs, cfg.discord.clearCommandName || 'clear');
         await c.application.commands.set([data]);
         log.info(`斜杠命令已注册：/${data.name}`);
     } catch (e) {
@@ -125,7 +125,7 @@ for (const event of ['guildCreate', 'guildDelete', 'guildUpdate', 'channelCreate
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName !== (cfg.discord.clearCommandName || '清空')) return;
+    if (interaction.commandName !== (cfg.discord.clearCommandName || 'clear')) return;
     try {
         await handleClear(interaction, { cfg, store, ambient, cadence, scopeOf });
     } catch (e) {
