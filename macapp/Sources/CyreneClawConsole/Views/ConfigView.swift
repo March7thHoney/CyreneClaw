@@ -36,10 +36,12 @@ struct ConfigView: View {
             scheduleSection.fadeUp(step: 3)
             reactionSection.fadeUp(step: 3)
             expressionSection.fadeUp(step: 3)
+            // 并排的两张卡要一样高，行高取较高那张
             HStack(alignment: .top, spacing: 14) {
                 modelSection
                 voiceSection
             }
+            .fixedSize(horizontal: false, vertical: true)
             .fadeUp(step: 3)
 
             if let err = model.lastError {
@@ -214,7 +216,7 @@ struct ConfigView: View {
     }
 
     private var modelSection: some View {
-        section("模型", icon: "cpu") {
+        section("模型", icon: "cpu", fill: true) {
             // 只有一套接口时不用选
             if model.config.profiles.count > 1 {
                 field("接口") {
@@ -246,7 +248,7 @@ struct ConfigView: View {
     }
 
     private var voiceSection: some View {
-        section("语音", icon: "waveform") {
+        section("语音", icon: "waveform", fill: true) {
             toggle("语音条", $voiceEnabled)
         }
     }
@@ -325,8 +327,9 @@ struct ConfigView: View {
         }
     }
 
+    // fill 为 true 时卡片纵向撑满所在行，与并排的卡片底边对齐
     @ViewBuilder
-    private func section<C: View>(_ title: String, icon: String, @ViewBuilder content: () -> C) -> some View {
+    private func section<C: View>(_ title: String, icon: String, fill: Bool = false, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
@@ -339,7 +342,7 @@ struct ConfigView: View {
             content()
         }
         .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: fill ? .infinity : nil, alignment: .topLeading)
         .glassCard(hoverable: false)
     }
 
