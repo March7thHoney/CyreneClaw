@@ -16,6 +16,7 @@ const ALLOW = {
     'discord.cadence.replyEveryN': { type: 'int', test: (v) => v >= 1 && v <= 1000, hint: '取值 1-1000' },
     'voice.enabled': { type: 'bool' },
     'log.level': { type: 'enum', values: ['debug', 'info', 'warn', 'error'] },
+    'llm.active': { type: 'string', test: (v) => /^[\w-]{1,32}$/.test(v), hint: '接口名只能含字母数字与 - _' },
     'llm.model': { type: 'string', test: (v) => /^[\w.:@/\[\]-]{1,128}$/.test(v), hint: '模型名只能含字母数字与 . : @ / - _ [ ]' },
     'discord.schedule': { type: 'array' },
     'discord.reaction': { type: 'object' },
@@ -156,10 +157,36 @@ function readConfig() {
 
 const argv = process.argv.slice(2);
 
+// 多套接口时 llm.model 指向生效那套的 model；旧的单套写法直接落在 llm 上
+function llmProfiles(cfg) {
+    const p = cfg.llm?.profiles;
+    return p && typeof p === 'object' && !Array.isArray(p) ? p : null;
+}
+
+function activeProfileName(cfg, override) {
+    const profiles = llmProfiles(cfg);
+    if (!profiles) return null;
+    const names = Object.keys(profiles);
+    if (override && profiles[override]) return override;
+    return names.includes(cfg.llm.active) ? cfg.llm.active : names[0] ?? null;
+}
+
+function modelPath(cfg, override) {
+    const name = activeProfileName(cfg, override);
+    return name ? `llm.profiles.${name}.model` : 'llm.model';
+}
+
 if (argv.includes('--get')) {
     const { cfg } = readConfig();
     const values = {};
     for (const key of Object.keys(ALLOW)) values[key] = pick(cfg, key) ?? null;
+    values['llm.active'] = activeProfileName(cfg);
+    values['llm.model'] = pick(cfg, modelPath(cfg)) ?? null;
+    // 接口清单按配置顺序给数组，只报地址与模型，apiKey 绝不回显
+    const profiles = llmProfiles(cfg);
+    values['llm.profiles'] = profiles
+        ? Object.entries(profiles).map(([name, p]) => ({ name, baseUrl: p?.baseUrl ?? '', model: p?.model ?? '' }))
+        : null;
     const token = pick(cfg, 'discord.token');
     // token 绝不回显，只报是否已配置
     out({ ok: true, values, tokenConfigured: Boolean(token) && !String(token).startsWith('在此填写') });
@@ -191,10 +218,18 @@ if (errors.length) out({ ok: false, errors }, 1);
 const { raw, cfg } = readConfig();
 const indent = (raw.match(/^\{\r?\n(\s+)"/) || [, '    '])[1];
 
+// 接口名必须是 profiles 里已有的一套；模型落到本次选定那套接口上
+if (updates['llm.active'] !== undefined) {
+    const profiles = llmProfiles(cfg);
+    if (!profiles) out({ ok: false, errors: [{ key: 'llm.active', message: 'config.json 里没有 llm.profiles' }] }, 1);
+    if (!profiles[updates['llm.active']]) out({ ok: false, errors: [{ key: 'llm.active', message: `没有名为 ${updates['llm.active']} 的接口` }] }, 1);
+}
+const targetOf = (k) => (k === 'llm.model' ? modelPath(cfg, updates['llm.active']) : k);
+
 const changed = {};
 for (const [k, v] of Object.entries(updates)) {
     let old;
-    try { old = setPath(cfg, k, v); } catch (e) { out({ ok: false, errors: [{ key: k, message: e.message }] }, 1); }
+    try { old = setPath(cfg, targetOf(k), v); } catch (e) { out({ ok: false, errors: [{ key: k, message: e.message }] }, 1); }
     if (JSON.stringify(old) !== JSON.stringify(v)) changed[k] = v;
 }
 if (Object.keys(changed).length === 0) out({ ok: true, changed: {} });

@@ -1,4 +1,4 @@
-// st-claude-cli-bridge 的 OpenAI 兼容客户端，非流式
+// OpenAI 兼容接口的客户端，接口由 cfg.llm 决定（本地 bridge 或远端站点）
 import { createLogger } from '../logger.js';
 import { materializeImages } from './parts.js';
 
@@ -18,17 +18,26 @@ export class BridgeClient {
         return next;
     }
 
+    // 请求体与请求头按当前接口拼装，extraBody 用于站点专属参数
+    buildRequest(messages, stream) {
+        const url = this.cfg.baseUrl.replace(/\/$/, '') + '/chat/completions';
+        const body = {
+            model: this.cfg.model,
+            messages: materializeImages(messages, this.dataDir, { vision: this.cfg.vision !== false }),
+            stream,
+            max_tokens: this.cfg.maxTokens ?? 8192,
+        };
+        if (this.cfg.stop?.length) body.stop = this.cfg.stop;
+        Object.assign(body, this.cfg.extraBody || {});
+        const headers = { 'Content-Type': 'application/json' };
+        if (this.cfg.apiKey) headers.Authorization = `Bearer ${this.cfg.apiKey}`;
+        return { url, body, headers };
+    }
+
     // 流式：本机聊天边生成边显示，onDelta 收到的是到目前为止的全文
     async stream(messages, { onDelta, signal } = {}) {
         return this.run(async () => {
-            const url = this.cfg.baseUrl.replace(/\/$/, '') + '/chat/completions';
-            const body = {
-                model: this.cfg.model,
-                messages: materializeImages(messages, this.dataDir),
-                stream: true,
-                max_tokens: this.cfg.maxTokens ?? 8192,
-            };
-            if (this.cfg.stop?.length) body.stop = this.cfg.stop;
+            const { url, body, headers } = this.buildRequest(messages, true);
 
             const ctrl = new AbortController();
             const timer = setTimeout(() => ctrl.abort(), this.cfg.timeoutMs || 600000);
@@ -36,10 +45,8 @@ export class BridgeClient {
 
             const started = Date.now();
             try {
-                const headers = { 'Content-Type': 'application/json' };
-                if (this.cfg.apiKey) headers.Authorization = `Bearer ${this.cfg.apiKey}`;
                 const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal });
-                if (!res.ok) throw new Error(`bridge 返回 ${res.status}: ${(await res.text()).slice(0, 200)}`);
+                if (!res.ok) throw new Error(`接口返回 ${res.status}: ${(await res.text()).slice(0, 200)}`);
 
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
@@ -75,14 +82,7 @@ export class BridgeClient {
 
     async complete(messages, { signal } = {}) {
         return this.run(async () => {
-            const url = this.cfg.baseUrl.replace(/\/$/, '') + '/chat/completions';
-            const body = {
-                model: this.cfg.model,
-                messages: materializeImages(messages, this.dataDir),
-                stream: false,
-                max_tokens: this.cfg.maxTokens ?? 8192,
-            };
-            if (this.cfg.stop?.length) body.stop = this.cfg.stop;
+            const { url, body, headers } = this.buildRequest(messages, false);
 
             const ctrl = new AbortController();
             const timer = setTimeout(() => ctrl.abort(), this.cfg.timeoutMs || 600000);
@@ -90,11 +90,9 @@ export class BridgeClient {
 
             const started = Date.now();
             try {
-                const headers = { 'Content-Type': 'application/json' };
-                if (this.cfg.apiKey) headers.Authorization = `Bearer ${this.cfg.apiKey}`;
-                // 本地回环必须直连，绝不能走代理
+                // 全局 fetch 不走 discord.proxy，本地回环与远端站点都直连
                 const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal });
-                if (!res.ok) throw new Error(`bridge 返回 ${res.status}: ${(await res.text()).slice(0, 200)}`);
+                if (!res.ok) throw new Error(`接口返回 ${res.status}: ${(await res.text()).slice(0, 200)}`);
                 const data = await res.json();
                 const text = data?.choices?.[0]?.message?.content ?? '';
                 log.info('生成完成', { 耗时秒: Math.round((Date.now() - started) / 1000), 字数: text.length });

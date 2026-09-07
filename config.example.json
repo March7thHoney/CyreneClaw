@@ -107,15 +107,35 @@
     }
   },
   "llm": {
-    "baseUrl": "http://127.0.0.1:5599/v1",
-    "apiKey": "",
-    "model": "claude-opus-5",
-    "stop": [
-      "\nHuman:",
-      "\nAssistant:"
-    ],
-    "timeoutMs": 600000,
-    "maxConcurrent": 1
+    "active": "bridge",
+    "profiles": {
+      "bridge": {
+        "baseUrl": "http://127.0.0.1:5599/v1",
+        "apiKey": "",
+        "model": "claude-opus-5",
+        "stop": [
+          "\nHuman:",
+          "\nAssistant:"
+        ],
+        "timeoutMs": 600000
+      },
+      "remote": {
+        "baseUrl": "https://example.com/v1",
+        "apiKey": "",
+        "model": "glm-5.3",
+        "vision": false,
+        "extraBody": {
+          "thinking": {
+            "type": "disabled"
+          }
+        },
+        "stop": [
+          "\nHuman:",
+          "\nAssistant:"
+        ],
+        "timeoutMs": 600000
+      }
+    }
   },
   "localChat": {
     "port": 5610,

@@ -33,15 +33,9 @@ final class ServicesModel: ObservableObject {
     @Published var configLoaded = false
 
     private var timer: Task<Void, Never>?
-    private var bridgeModels: [String] = []
+    // 模型清单按接口名缓存，切换下拉时按需拉取
+    private var modelCache: [String: [String]] = [:]
     private var directoryStamp: Date?
-
-    // bridge 拉不到时的兜底，和 st-claude-cli-bridge 默认清单保持一致
-    private static let fallbackModels = [
-        "claude-opus-5", "claude-opus-5:think", "claude-opus-5[1m]",
-        "claude-sonnet-5", "claude-sonnet-5:think", "claude-fable-5",
-        "claude-haiku-4-5-20251001",
-    ]
 
     func bootstrap() {
         root = ProjectRoot.discover()
@@ -78,8 +72,8 @@ final class ServicesModel: ObservableObject {
         do {
             config = try await ConfigStore.load(root: root)
             configLoaded = true
-            applyModelOptions()
             loadDirectoryIfChanged()
+            await loadModelOptions(profile: config.llmActive)
         } catch {
             lastError = error.localizedDescription
         }
@@ -111,7 +105,6 @@ final class ServicesModel: ObservableObject {
             let queued = h["queued"] as? Int ?? 0
             bridgeQueue = "\(running) / \(queued)"
             if br.kind == .unknown { bridge = .running }
-            if bridgeModels.isEmpty { await loadModelOptions() }
         } else {
             bridgeModel = nil
             bridgeQueue = nil
@@ -143,18 +136,24 @@ final class ServicesModel: ObservableObject {
         }
     }
 
-    // 模型清单跟着 bridge 走，bridge 改了配置这里自动同步
-    private func loadModelOptions() async {
-        guard let j = await HealthProbe.json("\(config.bridgeOrigin)/v1/models"),
-              let data = j["data"] as? [[String: Any]] else { return }
-        bridgeModels = data.compactMap { $0["id"] as? String }
-        applyModelOptions()
-    }
-
-    // 当前值必须在列表里，否则 Picker 选不中，会被下拉默认值悄悄改掉
-    private func applyModelOptions() {
-        var list = bridgeModels.isEmpty ? Self.fallbackModels : bridgeModels
-        if !config.model.isEmpty && !list.contains(config.model) { list.insert(config.model, at: 0) }
+    // 模型清单向选中接口的 /models 拉取，带该接口的 apiKey；拉不到就只剩它存的模型
+    func loadModelOptions(profile name: String) async {
+        guard let p = config.profiles.first(where: { $0.name == name }) else {
+            modelOptions = config.model.isEmpty ? [] : [config.model]
+            return
+        }
+        if modelCache[name] == nil {
+            var headers: [String: String] = [:]
+            if !p.apiKey.isEmpty { headers["Authorization"] = "Bearer \(p.apiKey)" }
+            if let j = await HealthProbe.json(p.modelsURL, headers: headers),
+               let data = j["data"] as? [[String: Any]] {
+                let ids = data.compactMap { $0["id"] as? String }
+                if !ids.isEmpty { modelCache[name] = ids }
+            }
+        }
+        // 当前值必须在列表里，否则 Picker 选不中，会被下拉默认值悄悄改掉
+        var list = modelCache[name] ?? []
+        if !p.model.isEmpty && !list.contains(p.model) { list.insert(p.model, at: 0) }
         modelOptions = list
     }
 

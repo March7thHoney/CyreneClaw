@@ -1,7 +1,7 @@
 # CyreneClaw
 
 Discord 上的 AI 角色扮演机器人。以 SillyTavern（酒馆）的提示词组装方式为基础，
-后端复用本地的 `st-claude-cli-bridge`（`claude -p`）。
+后端为任意 OpenAI 兼容接口，可在本地 `st-claude-cli-bridge`（`claude -p`）与远端站点之间一键切换。
 
 只做对话。可选开启本地 TTS，给角色台词补一条 Discord 原生语音条。
 
@@ -22,7 +22,7 @@ Discord 上的 AI 角色扮演机器人。以 SillyTavern（酒馆）的提示�
 
 - Node.js >= 20
 - SillyTavern 数据目录（只读取，酒馆本身可以关着）
-- 运行中的 `st-claude-cli-bridge`
+- 至少一个 OpenAI 兼容接口：本地 `st-claude-cli-bridge` 或远端站点
 - 仅开启语音时：`ffmpeg` / `ffprobe`（`brew install ffmpeg`）、
   GPT-SoVITS 运行时与对应的 Python 环境
 
@@ -55,7 +55,11 @@ cp config.example.json config.json
 | `prompt.personaDescription` | Discord 专用 persona |
 | `prompt.discordContract` | 输出契约，要求每轮都有台词 |
 | `prompt.tailContract` | 长度契约，追加在整段提示词的最后 |
-| `llm.baseUrl` / `model` | 指向 bridge |
+| `llm.active` | 当前生效的接口名，取 `llm.profiles` 里的键 |
+| `llm.profiles.<名>.baseUrl` / `apiKey` / `model` | 一套接口的地址、密钥与模型，`apiKey` 留空表示不带鉴权 |
+| `llm.profiles.<名>.vision` | 该接口是否接受图片，默认 true；false 时图片以 `[图片×n]` 文字标记进入对话 |
+| `llm.profiles.<名>.extraBody` | 原样并入请求体的站点专属参数，例如 `{"thinking": {"type": "disabled"}}` |
+| `llm.profiles.<名>.stop` / `timeoutMs` | 停止序列与单次请求超时 |
 | `voice.enabled` | 语音总开关，关闭后跳过 TTS |
 | `voice.dir` | 语音资源根目录，默认项目内 `voice/`（已忽略） |
 | `voice.python` | GPT-SoVITS 环境的 python 绝对路径 |
@@ -80,7 +84,7 @@ plist 由脚本按当前环境生成。
 `RunAtLoad` 使其在登录后自动启动，异常退出会被自动拉起。
 node 路径优先取软链。
 
-注意：机器人依赖 bridge 生成回复，两者都要常驻才能在重启后可用。
+生效接口为本地 bridge 时，bridge 与机器人都要常驻才能在重启后可用。
 
 ## 控制台 App
 
@@ -99,17 +103,20 @@ ad-hoc 签名，本机双击即开。
 - **状态与启停**：机器人走 launchd 启停（`launchctl kickstart` / `kill SIGTERM`）。
   停止发 SIGTERM，保留 launchd 里的服务注册。
   bridge 为独立常驻服务，语音由 `voice.autoStart` 按需拉起，两者在机器人卡片下方报状态。
-- **模型下拉**：候选来自 bridge 的 `/v1/models`，bridge 改了清单这里自动跟上；
-  拉不到时退回内置清单，当前值始终保留在列表里。
+  bridge 卡片盯的是名为 `bridge` 的接口地址，缺席时取第一个回环地址的接口。
+- **接口与模型下拉**：接口下拉列出 `llm.profiles` 里的全部接口，保存即切换 `llm.active`；
+  模型下拉向所选接口的 `/models` 拉清单，带该接口的 `apiKey`，拉不到时只剩它存的模型，
+  当前值始终保留在列表里。每套接口各自记住自己的模型。
 - **项目根目录**：依次从偏好、`com.cyreneclaw.bot.plist` 的 `WorkingDirectory`、
   app 所在位置推断，全部失败时弹出目录选择。
 - **定时消息**：服务器、频道、类型三个下拉，内容按类型切换成输入框、表情面板或贴纸面板。
   面板里的图取自本地缓存的表情与贴纸，见下文「服务器与表情清单」。
   清单尚未生成时下拉禁用，提示先启动机器人。
-- **配置编辑**：写回由 `scripts/config-set.mjs` 完成，白名单覆盖 10 项，token 与各类路径为只读。
-  界面给出其中 8 项，`log.level` 与 `discord.proxy` 留给脚本。
-- **即存即生效**：机器人监听 `config.json`，白名单里 `discord.proxy` 以外的 9 项保存后立即生效。
-  `discord.proxy` 于下次启动时生效。
+- **配置编辑**：写回由 `scripts/config-set.mjs` 完成，白名单覆盖 11 项，token、`apiKey` 与各类路径为只读。
+  界面给出其中 9 项，`log.level` 与 `discord.proxy` 留给脚本。
+  `llm.model` 落到 `llm.active` 所指那套接口的 `model` 上。
+- **即存即生效**：机器人监听 `config.json`，白名单里 `discord.proxy` 以外的 10 项保存后立即生效，
+  切换接口同样立即生效。`discord.proxy` 于下次启动时生效。
 
 ```bash
 node scripts/config-set.mjs --get              # 读当前值，token 只报是否已配置
@@ -186,8 +193,10 @@ Discord 连不上时本机聊天照常可用。
 频道氛围里带图的发言同样以 `[图片×n]` 标记。
 超过 `retentionDays` 的图片文件在启动时与每 6 小时的清理中删除，文件缺失的图片退化为文字标记。
 
-bridge 收到的是 OpenAI 格式的 `image_url` 内容块，落盘后由 CLI 用 Read 工具读取，每张图一次工具调用。
+接口收到的是 OpenAI 格式的 `image_url` 内容块。本地 bridge 落盘后由 CLI 用 Read 工具读取，每张图一次工具调用；
 bridge 的 `logPrompts` 开启时，其请求日志包含图片的 base64 内容。
+生效接口的 `vision` 为 false 时，图片照常下载落盘，进入请求前退化为 `[图片×n]` 标记；
+右键 Explain / Translate 遇到纯图片消息直接回复「当前接口不支持图片」。
 
 ## 定时消息
 

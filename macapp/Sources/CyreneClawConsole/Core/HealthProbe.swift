@@ -6,7 +6,7 @@ enum HealthProbe {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.connectionProxyDictionary = [:]
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
-        cfg.timeoutIntervalForRequest = 3
+        cfg.timeoutIntervalForRequest = 5
         return URLSession(configuration: cfg)
     }()
 
@@ -20,9 +20,12 @@ enum HealthProbe {
         }
     }
 
-    static func json(_ urlString: String) async -> [String: Any]? {
-        guard let url = URL(string: urlString),
-              let (data, _) = try? await session.data(from: url) else { return nil }
+    // headers 给需要鉴权的远端接口带 Authorization
+    static func json(_ urlString: String, headers: [String: String] = [:]) async -> [String: Any]? {
+        guard let url = URL(string: urlString) else { return nil }
+        var req = URLRequest(url: url)
+        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+        guard let (data, _) = try? await session.data(for: req) else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 }

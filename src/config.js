@@ -175,6 +175,42 @@ function normalizeReaction(cfg) {
     cfg.discord.reaction = kept;
 }
 
+// 一套接口的字段，从 llm.profiles[active] 平铺到 cfg.llm 上
+const LLM_FIELDS = ['baseUrl', 'apiKey', 'model', 'stop', 'timeoutMs', 'maxTokens', 'vision', 'extraBody'];
+
+// 多套接口配置选一套生效；没有 profiles 的旧写法按单套处理
+export function resolveLlm(llm) {
+    const src = llm && typeof llm === 'object' ? llm : {};
+    const profiles = src.profiles && typeof src.profiles === 'object' ? src.profiles : null;
+    let active = src.active;
+    let picked = src;
+    if (profiles) {
+        const names = Object.keys(profiles);
+        if (!names.length) return { error: 'llm.profiles 里一套接口都没有' };
+        if (!active || !profiles[active]) {
+            if (active) console.warn(`llm.active 指向的接口 ${active} 不存在，已改用 ${names[0]}`);
+            active = names[0];
+        }
+        picked = profiles[active] || {};
+    }
+    const out = { active: active ?? null, profiles };
+    for (const k of LLM_FIELDS) out[k] = picked[k];
+    out.vision = picked.vision !== false;
+    out.extraBody = picked.extraBody && typeof picked.extraBody === 'object' ? picked.extraBody : {};
+    if (!out.baseUrl || typeof out.baseUrl !== 'string') return { error: `接口 ${active ?? 'llm'} 缺少 baseUrl` };
+    if (!out.model || typeof out.model !== 'string') return { error: `接口 ${active ?? 'llm'} 缺少 model` };
+    return out;
+}
+
+function normalizeLlm(cfg) {
+    const r = resolveLlm(cfg.llm);
+    if (r.error) {
+        console.error(`llm 配置有误：${r.error}`);
+        process.exit(1);
+    }
+    cfg.llm = r;
+}
+
 // 控制台开放且能就地生效的配置项。代理要重建 Discord 连接，不在其列
 const HOT_KEYS = [
     'discord.owner.userId',
@@ -189,7 +225,6 @@ const HOT_KEYS = [
     'discord.images.retentionDays',
     'voice.enabled',
     'log.level',
-    'llm.model',
 ];
 
 function setPath(obj, dotted, value) {
@@ -232,6 +267,17 @@ export function applyHotConfig(cfg, next) {
         cfg.discord.reaction = rawReaction;
         normalizeReaction(cfg);
         if (JSON.stringify(cfg.discord.reaction) !== before) changed.push('discord.reaction');
+    }
+    // 接口整段重算再就地覆盖，BridgeClient 持有的是 cfg.llm 的引用
+    if (next.llm !== undefined) {
+        const r = resolveLlm(next.llm);
+        if (r.error) {
+            console.warn(`llm 配置有误，沿用当前接口：${r.error}`);
+        } else if (JSON.stringify(r) !== JSON.stringify(cfg.llm)) {
+            for (const k of Object.keys(cfg.llm)) delete cfg.llm[k];
+            Object.assign(cfg.llm, r);
+            changed.push('llm');
+        }
     }
     return changed;
 }
@@ -285,6 +331,7 @@ export function loadConfig(file) {
     normalizeLocalChat(cfg);
     normalizeSchedule(cfg);
     normalizeReaction(cfg);
+    normalizeLlm(cfg);
 
     cfg.configPath = configPath;
     return cfg;

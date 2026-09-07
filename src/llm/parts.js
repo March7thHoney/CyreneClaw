@@ -1,7 +1,8 @@
-// 发给 bridge 前把消息里的图片路径展开成 OpenAI 内容块
+// 发给接口前把消息里的图片路径展开成 OpenAI 内容块
 import fs from 'node:fs';
 import path from 'node:path';
 import { createLogger } from '../logger.js';
+import { imageMarker } from '../discord/images.js';
 
 const log = createLogger('llm');
 
@@ -13,14 +14,18 @@ function readDataUrl(dataDir, img) {
     return `data:${img.mime};base64,${fs.readFileSync(full).toString('base64')}`;
 }
 
-// 无图时原样返回，有图时返回新数组，入参不动
-export function materializeImages(messages, dataDir) {
+// 无图时原样返回，有图时返回新数组，入参不动；vision 为 false 时图片退化成文字标记
+export function materializeImages(messages, dataDir, { vision = true } = {}) {
     if (!messages.some((m) => m.images?.length)) return messages;
     return messages.map((m) => {
         if (!m.images?.length) {
             const rest = { ...m };
             delete rest.images;
             return rest;
+        }
+        if (!vision) {
+            const marker = imageMarker(m.images.length);
+            return { role: m.role, content: m.content ? `${m.content}\n${marker}` : marker };
         }
         const parts = [];
         for (const img of m.images) {

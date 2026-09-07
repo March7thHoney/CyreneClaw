@@ -80,6 +80,10 @@ export async function handleToolCommand(interaction, mode, { cfg, bridge, djs })
         await interaction.editReply({ content: '这条消息没有可处理的文字或图片。', allowedMentions: NO_MENTIONS });
         return;
     }
+    if (!text && cfg.llm.vision === false) {
+        await interaction.editReply({ content: '当前接口不支持图片。', allowedMentions: NO_MENTIONS });
+        return;
+    }
 
     const messages = [
         { role: 'system', content: PROMPTS[mode] },

@@ -50,6 +50,27 @@ struct ScheduleEntry: Identifiable, Equatable {
     }
 }
 
+// 一套 LLM 接口：名字、地址、密钥与当前模型，顺序与配置文件一致
+struct LlmProfile: Identifiable, Equatable {
+    let name: String
+    var baseUrl: String
+    var apiKey: String
+    var model: String
+    var id: String { name }
+
+    // 去掉末尾斜杠后拼 /models
+    var modelsURL: String {
+        var base = baseUrl
+        while base.hasSuffix("/") { base.removeLast() }
+        return "\(base)/models"
+    }
+
+    var isLoopback: Bool {
+        guard let host = URL(string: baseUrl)?.host else { return false }
+        return host == "127.0.0.1" || host == "localhost" || host == "::1"
+    }
+}
+
 // config.json 里控制台关心的那几项，其余字段一律不解析
 struct ConsoleConfig {
     var ownerUserId = ""
@@ -59,6 +80,9 @@ struct ConsoleConfig {
     var replyEveryN = 10
     var voiceEnabled = false
     var model = ""
+    // 生效接口名与全部接口；旧的单套写法只有一个匿名接口
+    var llmActive = ""
+    var profiles: [LlmProfile] = []
     var schedule = ScheduleEntry.emptySlots
     // 服务器 ID → 表情 token，缺席即不反应
     var reaction: [String: String] = [:]
@@ -123,6 +147,11 @@ enum ConfigStore {
         c.replyEveryN = v["discord.cadence.replyEveryN"]?.int ?? 10
         c.voiceEnabled = v["voice.enabled"]?.bool ?? false
         c.model = v["llm.model"]?.string ?? ""
+        c.llmActive = v["llm.active"]?.string ?? ""
+        c.profiles = (v["llm.profiles"]?.array ?? []).compactMap { item in
+            guard let o = item.object, let name = o["name"]?.string, !name.isEmpty else { return nil }
+            return LlmProfile(name: name, baseUrl: o["baseUrl"]?.string ?? "", apiKey: "", model: o["model"]?.string ?? "")
+        }
         c.schedule = parseSchedule(v["discord.schedule"]?.array)
         c.reaction = parseReaction(v["discord.reaction"]?.object)
         c.expressions = (v["localChat.expressions"]?.array ?? []).compactMap { $0.string }
@@ -163,9 +192,19 @@ enum ConfigStore {
     private static func readEndpoints(root: URL, into c: inout ConsoleConfig) {
         guard let data = try? Data(contentsOf: root.appendingPathComponent("config.json")),
               let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        if let llm = j["llm"] as? [String: Any], let base = llm["baseUrl"] as? String,
-           let u = URL(string: base), let host = u.host {
-            c.bridgeOrigin = "\(u.scheme ?? "http")://\(host):\(u.port ?? 80)"
+        // apiKey 不经写回脚本回显，拉模型清单要用，直接从原文件补上
+        let llm = j["llm"] as? [String: Any]
+        if let profiles = llm?["profiles"] as? [String: Any] {
+            for i in c.profiles.indices {
+                c.profiles[i].apiKey = (profiles[c.profiles[i].name] as? [String: Any])?["apiKey"] as? String ?? ""
+            }
+        } else if let base = llm?["baseUrl"] as? String {
+            c.profiles = [LlmProfile(name: "", baseUrl: base, apiKey: llm?["apiKey"] as? String ?? "", model: c.model)]
+        }
+        // bridge 卡片只盯本地 bridge：优先名为 bridge 的接口，其次第一个回环地址
+        let bridgeProfile = c.profiles.first(where: { $0.name == "bridge" }) ?? c.profiles.first(where: { $0.isLoopback })
+        if let base = bridgeProfile?.baseUrl, let origin = origin(of: base) {
+            c.bridgeOrigin = origin
         }
         if let voice = j["voice"] as? [String: Any], let ep = voice["endpoint"] as? String {
             c.voiceEndpoint = ep
@@ -178,6 +217,13 @@ enum ConfigStore {
         let chat = j["chat"] as? [String: Any]
         let raw = (chat?["dataDir"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "./data"
         c.dataDir = resolve(raw, root: root)
+    }
+
+    // 只保留 scheme://host[:port]，没写端口就沿用 scheme 默认端口
+    private static func origin(of base: String) -> String? {
+        guard let u = URL(string: base), let host = u.host else { return nil }
+        let port = u.port.map { ":\($0)" } ?? ""
+        return "\(u.scheme ?? "http")://\(host)\(port)"
     }
 
     // 后端支持 ~ 展开与相对项目根的写法，这里照同一套规则解析

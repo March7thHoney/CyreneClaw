@@ -10,6 +10,7 @@ struct ConfigView: View {
     @State private var replyEveryN = 10
     @State private var voiceEnabled = false
     @State private var modelName = ""
+    @State private var profileName = ""
     @State private var schedule = ScheduleEntry.emptySlots
     @State private var reaction: [String: String] = [:]
     @State private var expressions: [String] = []
@@ -23,7 +24,8 @@ struct ConfigView: View {
         return userId != c.ownerUserId || displayName != c.ownerDisplayName
             || dmEnabled != c.dmEnabled || cadenceEnabled != c.cadenceEnabled
             || replyEveryN != c.replyEveryN || voiceEnabled != c.voiceEnabled
-            || modelName != c.model || !ScheduleEntry.sameStored(schedule, c.schedule)
+            || modelName != c.model || profileName != c.llmActive
+            || !ScheduleEntry.sameStored(schedule, c.schedule)
             || reaction != c.reaction || expressions != c.expressions
     }
 
@@ -213,6 +215,18 @@ struct ConfigView: View {
 
     private var modelSection: some View {
         section("模型", icon: "cpu") {
+            // 只有一套接口时不用选
+            if model.config.profiles.count > 1 {
+                field("接口") {
+                    Picker("", selection: $profileName) {
+                        ForEach(model.config.profiles) { Text($0.name).tag($0.name) }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .onChange(of: profileName) { switchProfile() }
+                }
+            }
             field("模型") {
                 Picker("", selection: $modelName) {
                     ForEach(model.modelOptions, id: \.self) { Text($0).tag($0) }
@@ -222,6 +236,13 @@ struct ConfigView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    // 切到哪套接口就先显示它存的模型，再去拉那套接口的清单
+    private func switchProfile() {
+        guard let p = model.config.profiles.first(where: { $0.name == profileName }) else { return }
+        modelName = p.model
+        Task { await model.loadModelOptions(profile: profileName) }
     }
 
     private var voiceSection: some View {
@@ -260,6 +281,7 @@ struct ConfigView: View {
         cadenceEnabled = c.cadenceEnabled
         replyEveryN = c.replyEveryN
         voiceEnabled = c.voiceEnabled
+        profileName = c.llmActive
         modelName = c.model
         schedule = c.schedule
         reaction = c.reaction
@@ -270,7 +292,7 @@ struct ConfigView: View {
     private func save() {
         saving = true
         Task {
-            await model.saveConfig([
+            var updates: [String: Any] = [
                 "discord.owner.userId": userId,
                 "discord.owner.displayName": displayName,
                 "discord.dm.enabled": dmEnabled,
@@ -292,7 +314,10 @@ struct ConfigView: View {
                 },
                 "discord.reaction": reaction,
                 "localChat.expressions": expressions,
-            ])
+            ]
+            // 旧的单套写法没有接口名，不传 llm.active
+            if !profileName.isEmpty { updates["llm.active"] = profileName }
+            await model.saveConfig(updates)
             saving = false
             guard model.lastError == nil else { return }
             saved = true
