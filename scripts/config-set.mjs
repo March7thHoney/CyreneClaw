@@ -2,18 +2,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveUsers, validateUsers } from '../src/discord/users.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FILE = path.join(ROOT, 'config.json');
 
 // 只允许改这几项。token 与各类路径一律不开放，越权直接拒绝
 const ALLOW = {
-    'discord.owner.userId': { type: 'string', test: (v) => /^\d{17,20}$/.test(v), hint: 'Discord 用户 ID 是 17-20 位数字' },
-    'discord.owner.displayName': { type: 'string', test: (v) => v.trim() !== '' && v.length <= 64, hint: '称呼不能为空，最长 64 字' },
+    'discord.users': { type: 'users' },
     'discord.proxy': { type: 'string', test: (v) => v === '' || /^https?:\/\/\S+:\d+$/.test(v), hint: '留空表示直连，否则形如 http://127.0.0.1:1082' },
-    'discord.dm.enabled': { type: 'bool' },
-    'discord.cadence.enabled': { type: 'bool' },
-    'discord.cadence.replyEveryN': { type: 'int', test: (v) => v >= 1 && v <= 1000, hint: '取值 1-1000' },
     'voice.enabled': { type: 'bool' },
     'log.level': { type: 'enum', values: ['debug', 'info', 'warn', 'error'] },
     'llm.active': { type: 'string', test: (v) => /^[\w-]{1,32}$/.test(v), hint: '接口名只能含字母数字与 - _' },
@@ -121,7 +118,7 @@ function setPath(obj, dotted, value) {
 function coerce(key, raw) {
     const spec = ALLOW[key];
     if (!spec) throw new Error('不是允许修改的配置项');
-    if (spec.type === 'array' || spec.type === 'object') throw new Error('只能通过 --json 传入');
+    if (['array', 'object', 'users', 'expressions'].includes(spec.type)) throw new Error('只能通过 --json 传入');
     if (spec.type === 'bool') {
         const s = String(raw).toLowerCase();
         if (BOOL_TRUE.has(s)) return true;
@@ -139,6 +136,7 @@ function coerce(key, raw) {
 function validate(key, value) {
     const spec = ALLOW[key];
     if (!spec) throw new Error('不是允许修改的配置项');
+    if (spec.type === 'users') return validateUsers(value);
     if (spec.type === 'array') return validateSchedule(value);
     if (spec.type === 'object') return validateReaction(value);
     if (spec.type === 'expressions') return validateExpressions(value);
@@ -180,6 +178,8 @@ if (argv.includes('--get')) {
     const { cfg } = readConfig();
     const values = {};
     for (const key of Object.keys(ALLOW)) values[key] = pick(cfg, key) ?? null;
+    try { values['discord.users'] = resolveUsers(cfg.discord); }
+    catch (e) { out({ ok: false, errors: [{ key: 'discord.users', message: e.message }] }, 1); }
     values['llm.active'] = activeProfileName(cfg);
     values['llm.model'] = pick(cfg, modelPath(cfg)) ?? null;
     // 接口清单按配置顺序给数组，只报地址与模型，apiKey 绝不回显
@@ -214,6 +214,7 @@ for (const [k, v] of Object.entries(updates)) {
     try { validate(k, v); } catch (e) { errors.push({ key: k, message: e.message }); }
 }
 if (errors.length) out({ ok: false, errors }, 1);
+if (updates['discord.users'] !== undefined) updates['discord.users'] = validateUsers(updates['discord.users']);
 
 const { raw, cfg } = readConfig();
 const indent = (raw.match(/^\{\r?\n(\s+)"/) || [, '    '])[1];

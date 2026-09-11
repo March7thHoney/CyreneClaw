@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { resolveUsers } from './discord/users.js';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -213,11 +214,6 @@ function normalizeLlm(cfg) {
 
 // 控制台开放且能就地生效的配置项。代理要重建 Discord 连接，不在其列
 const HOT_KEYS = [
-    'discord.owner.userId',
-    'discord.owner.displayName',
-    'discord.dm.enabled',
-    'discord.cadence.enabled',
-    'discord.cadence.replyEveryN',
     'discord.images.enabled',
     'discord.images.maxPerMessage',
     'discord.images.maxBytes',
@@ -240,6 +236,17 @@ function setPath(obj, dotted, value) {
 // 就地改而不换对象：各组件持有的是 cfg 下子对象的引用
 export function applyHotConfig(cfg, next) {
     const changed = [];
+    if (next.discord) {
+        try {
+            const users = resolveUsers(next.discord);
+            if (JSON.stringify(users) !== JSON.stringify(cfg.discord.users)) {
+                cfg.discord.users = users;
+                changed.push('discord.users');
+            }
+        } catch (e) {
+            console.warn(`用户规则无效，沿用当前权限：${e.message}`);
+        }
+    }
     for (const key of HOT_KEYS) {
         const to = pick(next, key);
         if (to === undefined) continue;
@@ -327,6 +334,12 @@ export function loadConfig(file) {
         }
     }
 
+    try {
+        cfg.discord.users = resolveUsers(cfg.discord);
+    } catch (e) {
+        console.error(`用户规则无效：${e.message}`);
+        process.exit(1);
+    }
     normalizeVoice(cfg);
     normalizeLocalChat(cfg);
     normalizeSchedule(cfg);

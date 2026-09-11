@@ -1,4 +1,5 @@
-// 消息右键命令：Explain / Translate，独立于角色人设，仅 owner 可用，结果仅自己可见
+// 消息右键命令：Explain / Translate，按用户指令权限执行，结果仅自己可见。
+import { userRule } from './users.js';
 import { createLogger } from '../logger.js';
 import { imageConfig, pickImages, downloadImages } from './images.js';
 import { chunkText } from './chunk.js';
@@ -63,7 +64,7 @@ function cleanSource(content) {
 
 export async function handleToolCommand(interaction, mode, { cfg, bridge, djs }) {
     const { MessageFlags } = djs;
-    if (interaction.user.id !== cfg.discord.owner.userId) {
+    if (!userRule(cfg, interaction.user.id)?.commandsEnabled) {
         await interaction.reply({ content: cfg.discord.replies.notOwner, flags: MessageFlags.Ephemeral, allowedMentions: NO_MENTIONS });
         return;
     }

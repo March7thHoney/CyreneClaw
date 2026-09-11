@@ -29,6 +29,7 @@ export class ChatStore {
     }
 
     append(scope, entry) {
+        const cached = this.load(scope);
         const file = scopeFilePath(this.dataDir, scope);
         fs.mkdirSync(path.dirname(file), { recursive: true });
         if (!fs.existsSync(file)) {
@@ -36,7 +37,7 @@ export class ChatStore {
             fs.writeFileSync(file, JSON.stringify(header) + '\n');
         }
         fs.appendFileSync(file, JSON.stringify(entry) + '\n');
-        this.load(scope).push(entry);
+        cached.push(entry);
         this.rotateIfNeeded(scope);
     }
 

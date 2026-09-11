@@ -14,7 +14,7 @@ Discord 上的 AI 角色扮演机器人。以 SillyTavern（酒馆）的提示�
 - **Discord 上只显示台词**：动作与场景描写留在上下文里，供下一轮使用。
 - **每个频道独立上下文**：私聊按用户、服务器按频道各自存档。
 - **控制台内直接对话**：本机聊天页显示模型原文，台词与场景描写分色，独立存档。
-- **只回应机器人主人**：按用户 ID 精确匹配。
+- **多用户权限**：最多三个用户，分别控制私聊、群聊提及、自动回复和 Discord 指令。
 - **原生语音条**：本地 GPT-SoVITS 合成角色声音，以带波形的原生语音消息发出，
   合成走后台串行队列。
 
@@ -38,11 +38,15 @@ cp config.example.json config.json
 |---|---|
 | `discord.token` | Bot Token |
 | `discord.proxy` | 出站代理，留空则直连 |
-| `discord.owner.userId` | 你的 Discord 用户 ID，只有这个人能触发机器人 |
-| `discord.owner.displayName` | 角色对你的称呼，用于 `{{user}}` |
-| `discord.guilds` | 允许的服务器，每个可单独设 `requireMention`、`replyEveryN` |
-| `discord.cadence.enabled` | 群聊节奏总开关，关闭后仅 @ 或回复触发 |
-| `discord.cadence.replyEveryN` | 你在一个频道里连说多少条没被回应的话，角色强制回一次 |
+| `discord.owner.userId` | 角色设定和本机聊天使用的原有用户身份 |
+| `discord.owner.displayName` | 角色设定中的称呼，用于 `{{user}}` |
+| `discord.users` | 用户权限列表，最多三人，空列表关闭全部 Discord 用户权限 |
+| `discord.users[].userId` / `displayName` | 唯一的 17–20 位数字 ID、最多 64 字的称呼；称呼留空使用 Discord 昵称 |
+| `discord.users[].dmEnabled` | 允许直接私聊 |
+| `discord.users[].mentionEnabled` | 允许通过群聊 @ 或回复昔涟触发 |
+| `discord.users[].cadenceEnabled` / `replyEveryN` | 自动回复开关及 N 值（1–1000），按用户和频道独立计数 |
+| `discord.users[].commandsEnabled` | 允许使用 `/clear`、Explain、Translate |
+| `discord.guilds` | 允许的服务器；`channels` 指定频道列表，空值表示全部频道 |
 | `discord.images.enabled` | 图片输入总开关 |
 | `discord.images.maxPerMessage` | 单条消息最多读取的图片数，默认 4 |
 | `discord.images.maxBytes` | 单张图片的字节上限，默认 10 MB |
@@ -67,6 +71,11 @@ cp config.example.json config.json
 | `voice.maxChars` | 单条语音的朗读上限，超出按标点回退截断 |
 
 ## 运行
+
+用户权限以 `discord.users` 为准。旧配置缺少该字段时，从 `discord.owner`、`discord.dm`、
+`discord.cadence` 生成原有用户规则，前端保存后写入列表。
+每次提及回复只重置发言者在该频道的计数；修改 N 保留计数，关闭自动回复或删除用户清除其计数。
+`/clear` 清空当前会话，重置当前频道所有用户的计数。
 
 ```bash
 npm install
@@ -112,11 +121,14 @@ ad-hoc 签名，本机双击即开。
 - **定时消息**：服务器、频道、类型三个下拉，内容按类型切换成输入框、表情面板或贴纸面板。
   面板里的图取自本地缓存的表情与贴纸，见下文「服务器与表情清单」。
   清单尚未生成时下拉禁用，提示先启动机器人。
-- **配置编辑**：写回由 `scripts/config-set.mjs` 完成，白名单覆盖 11 项，token、`apiKey` 与各类路径为只读。
-  界面给出其中 9 项，`log.level` 与 `discord.proxy` 留给脚本。
+- **用户权限列表**：添加、编辑和删除最多三个用户，每行配置称呼、四项独立权限和 N 值。
+  新增空行的权限默认关闭。私聊记录按用户隔离，群聊共享频道记录并保留每条消息的发言者。
+- **配置编辑**：写回由 `scripts/config-set.mjs` 完成，用户列表整体校验并原子保存。
+  `log.level` 与 `discord.proxy` 通过脚本修改，token、`apiKey` 与各类路径为只读。
   `llm.model` 落到 `llm.active` 所指那套接口的 `model` 上。
-- **即存即生效**：机器人监听 `config.json`，白名单里 `discord.proxy` 以外的 10 项保存后立即生效，
-  切换接口同样立即生效。`discord.proxy` 于下次启动时生效。
+- **即存即生效**：机器人监听 `config.json`，用户权限、N 值和接口等设置保存后自动生效，监听防抖约 300 毫秒。
+  排队消息在生成开始前复核权限，已经开始的一轮允许完成。无效用户规则保留上次有效配置并记录错误。
+  `discord.proxy` 于下次启动时生效。
 
 ```bash
 node scripts/config-set.mjs --get              # 读当前值，token 只报是否已配置
@@ -164,22 +176,23 @@ Discord 连不上时本机聊天照常可用。
 
 | 场景 | 条件 |
 |---|---|
-| 私聊 | 直接说话即可 |
-| 服务器频道 | @ 机器人，或回复它自己的消息 |
-| 服务器频道（节奏） | 你连说满 `replyEveryN` 条没被回应的话（默认 10），第 N 条强制触发 |
+| 私聊 | 用户开启私聊权限，直接说话即可 |
+| 服务器频道 | 用户开启群聊提及权限，@ 机器人或回复它自己的消息 |
+| 服务器频道（节奏） | 用户开启自动回复，个人消息满 `replyEveryN` 条时触发（默认 10） |
 | 纯图片消息 | 与文字消息相同，以上三种场景均可触发 |
 | 清空当前频道记忆 | 斜杠命令 `/clear`（旧记录归档保留） |
 | 解释一条消息 | 右键消息 → APP → `Explain`，用简体中文说明这条消息说了什么，支持图片 |
 | 翻译一条消息 | 右键消息 → APP → `Translate`，外语译成简体中文，中文译成英文，支持图片 |
 
-服务器频道里其他人的发言作为现场氛围注入上下文，机器人只回应主人。
+服务器频道里其他人的发言作为现场氛围注入上下文，机器人按用户列表中的权限回复。
 
-群聊节奏只统计主人本人的发言，按频道各自计数：被 @ 或被回复而正常触发时计数清零，
-`/clear` 也清零。计数只在内存里，重启归零。节奏触发的那一轮与普通一轮相同：
+群聊节奏按用户和频道独立计数：提及触发时清零该发言者的计数，
+`/clear` 清零当前频道全部计数。计数保存在内存里，重启归零。节奏触发的那一轮与普通一轮相同：
 第 N 条就是这轮的输入，之前被跳过的话和其他人的发言已经在现场氛围里。
-某个服务器想用不同的阈值，在它的 `discord.guilds` 条目里加 `replyEveryN` 即可覆盖全局值。
+每位用户的阈值由其 `discord.users[].replyEveryN` 设置，适用于允许的全部服务器。
 
-`Explain` 与 `Translate` 仅主人可用，结果仅自己可见。两个命令使用各自独立的系统提示词，
+`/clear`、`Explain` 与 `Translate` 由每位用户的 Discord 指令开关统一控制，结果仅自己可见。
+`Explain` 与 `Translate` 使用各自独立的系统提示词，
 只读取目标消息本身的文字与图片附件，结果不写入聊天记录。
 图片落盘到 `chat.dataDir/images/tools/<用户ID>/`，张数、大小与保留天数沿用 `discord.images`。
 

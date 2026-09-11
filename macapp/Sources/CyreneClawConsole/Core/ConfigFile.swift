@@ -1,5 +1,30 @@
 import Foundation
 
+struct UserRule: Identifiable, Equatable {
+    static let limit = 3
+    let id = UUID()
+    var userId = ""
+    var displayName = ""
+    var dmEnabled = false
+    var mentionEnabled = false
+    var cadenceEnabled = false
+    var replyEveryN = 10
+    var commandsEnabled = false
+
+    var stored: [String: Any] {
+        ["userId": userId.trimmingCharacters(in: .whitespacesAndNewlines),
+         "displayName": displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+         "dmEnabled": dmEnabled, "mentionEnabled": mentionEnabled,
+         "cadenceEnabled": cadenceEnabled, "replyEveryN": replyEveryN, "commandsEnabled": commandsEnabled]
+    }
+
+    static func == (a: UserRule, b: UserRule) -> Bool {
+        a.userId == b.userId && a.displayName == b.displayName && a.dmEnabled == b.dmEnabled
+            && a.mentionEnabled == b.mentionEnabled && a.cadenceEnabled == b.cadenceEnabled
+            && a.replyEveryN == b.replyEveryN && a.commandsEnabled == b.commandsEnabled
+    }
+}
+
 // 定时消息的内容类型，一条只发其中一样
 enum ScheduleKind: String, CaseIterable, Identifiable, Hashable {
     case text
@@ -73,11 +98,7 @@ struct LlmProfile: Identifiable, Equatable {
 
 // config.json 里控制台关心的那几项，其余字段一律不解析
 struct ConsoleConfig {
-    var ownerUserId = ""
-    var ownerDisplayName = ""
-    var dmEnabled = true
-    var cadenceEnabled = true
-    var replyEveryN = 10
+    var users: [UserRule] = []
     var voiceEnabled = false
     var model = ""
     // 生效接口名与全部接口；旧的单套写法只有一个匿名接口
@@ -140,11 +161,18 @@ enum ConfigStore {
 
         var c = ConsoleConfig()
         let v = resp.values ?? [:]
-        c.ownerUserId = v["discord.owner.userId"]?.string ?? ""
-        c.ownerDisplayName = v["discord.owner.displayName"]?.string ?? ""
-        c.dmEnabled = v["discord.dm.enabled"]?.bool ?? true
-        c.cadenceEnabled = v["discord.cadence.enabled"]?.bool ?? true
-        c.replyEveryN = v["discord.cadence.replyEveryN"]?.int ?? 10
+        c.users = (v["discord.users"]?.array ?? []).map { value in
+            let item = value.object ?? [:]
+            var user = UserRule()
+            user.userId = item["userId"]?.string ?? ""
+            user.displayName = item["displayName"]?.string ?? ""
+            user.dmEnabled = item["dmEnabled"]?.bool ?? false
+            user.mentionEnabled = item["mentionEnabled"]?.bool ?? false
+            user.cadenceEnabled = item["cadenceEnabled"]?.bool ?? false
+            user.replyEveryN = item["replyEveryN"]?.int ?? 10
+            user.commandsEnabled = item["commandsEnabled"]?.bool ?? false
+            return user
+        }
         c.voiceEnabled = v["voice.enabled"]?.bool ?? false
         c.model = v["llm.model"]?.string ?? ""
         c.llmActive = v["llm.active"]?.string ?? ""

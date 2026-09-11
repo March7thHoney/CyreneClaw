@@ -1,4 +1,5 @@
-// 斜杠命令：清空当前频道上下文，仅 owner 可用
+// 斜杠命令：按用户的指令权限清空当前频道上下文。
+import { userRule } from './users.js';
 export function buildCommandData(djs, name) {
     const { SlashCommandBuilder, InteractionContextType } = djs;
     return new SlashCommandBuilder()
@@ -13,8 +14,7 @@ export function buildCommandData(djs, name) {
 }
 
 export async function handleClear(interaction, { cfg, store, ambient, cadence, scopeOf }) {
-    // 命令同样只认 owner，其他人一律看不到效果
-    if (interaction.user.id !== cfg.discord.owner.userId) {
+    if (!userRule(cfg, interaction.user.id)?.commandsEnabled) {
         await interaction.reply({ content: cfg.discord.replies.notOwner, ephemeral: true });
         return;
     }

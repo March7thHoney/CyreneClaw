@@ -11,6 +11,9 @@ export function watchConfig(cfg, onChange) {
     const file = cfg.configPath;
     const name = path.basename(file);
     let timer = null;
+    let watcher = null;
+    let polling = false;
+    let closed = false;
 
     function reload() {
         let next;
@@ -31,14 +34,36 @@ export function watchConfig(cfg, onChange) {
         }
     }
 
-    // 写回走的是临时文件 rename，盯文件本身会在换 inode 后失效，所以盯目录
-    const watcher = fs.watch(path.dirname(file), (_event, filename) => {
-        if (filename !== name) return;
+    function scheduleReload() {
+        if (closed) return;
         clearTimeout(timer);
         timer = setTimeout(reload, DEBOUNCE_MS);
-    });
-    watcher.unref();
+    }
+
+    // 系统目录监听不可用时用文件状态轮询继续接收权限更新。
+    function fallback(err) {
+        if (closed || polling) return;
+        watcher?.close();
+        polling = true;
+        log.warn('目录监听不可用，改用文件状态轮询', { err: err?.code || err?.message });
+        fs.watchFile(file, { persistent: false, interval: DEBOUNCE_MS }, scheduleReload);
+        scheduleReload();
+    }
+
+    // 写回会替换 inode，监听父目录可持续接收连续原子保存。
+    try {
+        watcher = fs.watch(path.dirname(file), (_event, filename) => {
+            if (filename === name) scheduleReload();
+        });
+        watcher.on('error', fallback);
+        watcher.unref();
+    } catch (e) { fallback(e); }
     log.info('已监听配置文件，控制台里的改动即存即生效');
 
-    return () => { clearTimeout(timer); watcher.close(); };
+    return () => {
+        closed = true;
+        clearTimeout(timer);
+        watcher?.close();
+        if (polling) fs.unwatchFile(file, scheduleReload);
+    };
 }

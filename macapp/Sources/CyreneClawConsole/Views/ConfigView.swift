@@ -3,11 +3,7 @@ import SwiftUI
 struct ConfigView: View {
     @ObservedObject var model: ServicesModel
 
-    @State private var userId = ""
-    @State private var displayName = ""
-    @State private var dmEnabled = true
-    @State private var cadenceEnabled = true
-    @State private var replyEveryN = 10
+    @State private var users: [UserRule] = []
     @State private var voiceEnabled = false
     @State private var modelName = ""
     @State private var profileName = ""
@@ -21,9 +17,7 @@ struct ConfigView: View {
 
     private var dirty: Bool {
         let c = model.config
-        return userId != c.ownerUserId || displayName != c.ownerDisplayName
-            || dmEnabled != c.dmEnabled || cadenceEnabled != c.cadenceEnabled
-            || replyEveryN != c.replyEveryN || voiceEnabled != c.voiceEnabled
+        return users != c.users || voiceEnabled != c.voiceEnabled
             || modelName != c.model || profileName != c.llmActive
             || !ScheduleEntry.sameStored(schedule, c.schedule)
             || reaction != c.reaction || expressions != c.expressions
@@ -32,7 +26,6 @@ struct ConfigView: View {
     var body: some View {
         VStack(spacing: 14) {
             discordSection.fadeUp(step: 2)
-            cadenceSection.fadeUp(step: 3)
             scheduleSection.fadeUp(step: 3)
             reactionSection.fadeUp(step: 3)
             expressionSection.fadeUp(step: 3)
@@ -60,36 +53,24 @@ struct ConfigView: View {
     }
 
     private var discordSection: some View {
-        section("Discord", icon: "person.crop.circle") {
-            duo {
-                field("主人用户 ID") {
-                    TextField("", text: $userId).textFieldStyle(.plain).modifier(InputBox())
-                }
-            } _: {
-                field("称呼") {
-                    TextField("", text: $displayName).textFieldStyle(.plain).modifier(InputBox())
+        section("Discord 用户权限", icon: "person.2") {
+            ForEach($users) { $user in
+                UserRuleRow(user: $user) {
+                    users.removeAll { $0.id == user.id }
                 }
             }
-            toggle("私聊", $dmEnabled)
-        }
-    }
-
-    private var cadenceSection: some View {
-        section("群聊节奏", icon: "metronome") {
-            duo {
-                toggle("节奏", $cadenceEnabled)
-            } _: {
-                field("阈值") {
-                    Stepper(value: $replyEveryN, in: 1...1000) {
-                        Text("\(replyEveryN)")
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(Theme.ink)
-                            .monospacedDigit()
-                    }
-                    .disabled(!cadenceEnabled)
-                    Spacer()
-                }
+            HStack {
+                Text("\(users.count) / \(UserRule.limit) 个用户")
+                    .font(.system(size: 12)).foregroundStyle(Theme.inkDesc)
+                Spacer()
+                Button("添加用户") { users.append(UserRule()) }
+                    .buttonStyle(GhostButtonStyle(compact: true))
+                    .disabled(users.count >= UserRule.limit)
             }
+            Text("群聊 @ 包含回复昔涟；每 N 条按用户和频道分别计数。指令包含 /clear、Explain、Translate。")
+                .font(.system(size: 11)).foregroundStyle(Theme.inkDesc)
+            Text("保存后权限自动生效。/clear 会清空当前频道的共享对话记忆。")
+                .font(.system(size: 11)).foregroundStyle(Theme.inkDesc)
         }
     }
 
@@ -255,7 +236,7 @@ struct ConfigView: View {
 
     private var actionBar: some View {
         HStack(spacing: 10) {
-            Text(saved && !dirty ? "已保存，已生效" : "保存后即刻生效")
+            Text(saved && !dirty ? "已保存，自动生效" : "保存后即刻生效")
                 .font(.system(size: 12))
                 .foregroundStyle(saved && !dirty ? Theme.ok : Theme.inkDesc)
             Spacer()
@@ -277,11 +258,7 @@ struct ConfigView: View {
 
     private func reset() {
         let c = model.config
-        userId = c.ownerUserId
-        displayName = c.ownerDisplayName
-        dmEnabled = c.dmEnabled
-        cadenceEnabled = c.cadenceEnabled
-        replyEveryN = c.replyEveryN
+        users = c.users
         voiceEnabled = c.voiceEnabled
         profileName = c.llmActive
         modelName = c.model
@@ -295,11 +272,7 @@ struct ConfigView: View {
         saving = true
         Task {
             var updates: [String: Any] = [
-                "discord.owner.userId": userId,
-                "discord.owner.displayName": displayName,
-                "discord.dm.enabled": dmEnabled,
-                "discord.cadence.enabled": cadenceEnabled,
-                "discord.cadence.replyEveryN": replyEveryN,
+                "discord.users": users.map { $0.stored },
                 "voice.enabled": voiceEnabled,
                 "llm.model": modelName,
                 "discord.schedule": schedule.map { e -> [String: Any] in
@@ -324,6 +297,7 @@ struct ConfigView: View {
             guard model.lastError == nil else { return }
             saved = true
             await model.reloadConfig()
+            users = model.config.users
         }
     }
 

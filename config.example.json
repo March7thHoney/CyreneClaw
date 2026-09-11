@@ -6,19 +6,22 @@
       "userId": "在此填写你的 Discord 用户 ID",
       "displayName": "在此填写角色该怎么称呼你"
     },
-    "dm": {
-      "enabled": true
-    },
+    "users": [
+      {
+        "userId": "在此填写你的 Discord 用户 ID",
+        "displayName": "在此填写角色该怎么称呼你",
+        "dmEnabled": true,
+        "mentionEnabled": true,
+        "cadenceEnabled": true,
+        "replyEveryN": 10,
+        "commandsEnabled": true
+      }
+    ],
     "groupPolicy": "allowlist",
     "guilds": {
       "在此填写服务器 ID": {
-        "requireMention": true,
         "channels": null
       }
-    },
-    "cadence": {
-      "enabled": true,
-      "replyEveryN": 10
     },
     "images": {
       "enabled": true,
@@ -66,7 +69,7 @@
     "debounceMs": 1500,
     "clearCommandName": "clear",
     "replies": {
-      "notOwner": "（仅主人可用该命令时的提示语，用角色口吻写）",
+      "notOwner": "（当前用户未开启指令权限时的提示语，用角色口吻写）",
       "cleared": "（清空成功时的提示语，用角色口吻写）",
       "nothingToClear": "（本来就没有记忆时的提示语）",
       "error": "（生成失败时的提示语）"

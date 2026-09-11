@@ -39,7 +39,7 @@ function injectAtDepth(chatMsgs, injections) {
 }
 
 // history 最旧在前且已含本轮 user，ambient 为已渲染的频道背景块
-export function buildMessages({ cfg, history, ambient = null, withContract = true }) {
+export function buildMessages({ cfg, history, ambient = null, withContract = true, discordChat = false }) {
     const st = cfg.sillytavern;
     const card = loadCard(st.characterPath);
     const preset = loadPreset(st.presetPath);
@@ -61,7 +61,7 @@ export function buildMessages({ cfg, history, ambient = null, withContract = tru
     const wiOpts = cfg.prompt.worldInfo;
     const chatForWI = [...history]
         .reverse()
-        .map((m) => (wiOpts.includeNames ? `${m.role === 'user' ? userName : charName}: ${m.content}` : m.content));
+        .map((m) => (wiOpts.includeNames ? `${discordChat && m.name ? m.name : m.role === 'user' ? userName : charName}: ${m.content}` : m.content));
     const wi = scanWorldInfo(chatForWI, entries, {
         depth: wiOpts.depth,
         budgetPercent: wiOpts.budgetPercent,
@@ -106,6 +106,9 @@ export function buildMessages({ cfg, history, ambient = null, withContract = tru
 
     // 深度注入：D0 放世界书条目，再接 Discord 契约；D1 放频道背景
     const injections = [];
+    if (discordChat) {
+        injections.push({ depth: 0, role: 'system', content: `Discord 对话中，每条用户消息的发言者以署名和用户 ID 为准。角色设定中的 ${JSON.stringify(userName)} 对应用户 ID ${cfg.discord.owner.userId}。按各自身份理解发言者和角色的关系。` });
+    }
     for (const g of wi.depth) {
         injections.push({ depth: g.depth, role: g.role === 0 ? 'system' : 'user', content: g.entries.join('\n') });
     }

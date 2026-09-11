@@ -68,4 +68,17 @@ if [ "$DO_INSTALL" = 1 ]; then
     LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
     [ -x "$LSREG" ] && "$LSREG" -f "$DEST" || true
     echo "已安装到 $DEST"
+    if pgrep -x "$EXEC_NAME" > /dev/null; then
+        osascript -e "tell application id \"$BUNDLE_ID\" to quit"
+        for attempt in {1..20}; do
+            pgrep -x "$EXEC_NAME" > /dev/null || break
+            sleep 0.2
+        done
+        if pgrep -x "$EXEC_NAME" > /dev/null; then
+            pkill -TERM -x "$EXEC_NAME"
+            sleep 0.5
+        fi
+    fi
+    open -g "$DEST"
+    echo "已后台重开 $DEST"
 fi

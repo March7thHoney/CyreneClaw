@@ -4,7 +4,8 @@ import { watchConfig } from './config-watch.js';
 import { configureLogger, createLogger } from './logger.js';
 import { createClient } from './discord/client.js';
 import { scopeOf } from './discord/scope.js';
-import { decide, stripMentions } from './discord/gate.js';
+import { decide, stripMentions, filterQueuedBatch } from './discord/gate.js';
+import { userDisplayName } from './discord/users.js';
 import { AmbientBuffer } from './discord/ambient.js';
 import { Cadence } from './discord/cadence.js';
 import { startTyping } from './discord/typing.js';
@@ -46,6 +47,8 @@ startImageRetention(cfg);
 let emptyContentStreak = 0;
 
 async function handleTurn(scope, batch) {
+    batch = filterQueuedBatch(scope, batch, cfg);
+    if (!batch.length) return;
     const channel = batch[0].channel;
     const ambientBlock = scope.kind === 'guild'
         ? ambient.render(scope.channelId, scope.label, new Set(batch.map((b) => b.id)))
@@ -96,7 +99,7 @@ const refreshDirectory = createDirectoryRefresher({ client, djs, cfg });
 // 控制台开放的配置改完即生效，不必重启
 watchConfig(cfg, (changed) => {
     if (changed.includes('log.level')) configureLogger(cfg.log);
-    if (changed.some((k) => k.startsWith('discord.cadence'))) cadence.reconfigure(cfg);
+    if (changed.includes('discord.users')) cadence.reconfigure(cfg);
     if (changed.includes('discord.schedule')) scheduler.reconfigure();
     if (changed.includes('voice.enabled')) {
         voice.reconfigure(cfg).catch((e) => log.error('语音开关切换失败', { err: e?.message }));
@@ -162,10 +165,7 @@ client.on('messageCreate', async (message) => {
         if (message.guildId && !message.author?.bot) {
             ambient.record(message.channelId, {
                 id: message.id,
-                // owner 用角色认识的那个名字，否则频道里的昵称会被当成另一个人
-                author: message.author.id === cfg.discord.owner.userId
-                    ? cfg.discord.owner.displayName
-                    : (message.member?.displayName || message.author.username),
+                author: userDisplayName(cfg, message.author.id, message.member?.displayName || message.author.username),
                 content: [message.content, eligible.length ? imageMarker(eligible.length) : ''].filter(Boolean).join(' '),
                 ts: message.createdTimestamp,
             });
@@ -183,7 +183,7 @@ client.on('messageCreate', async (message) => {
                 if (ref.content || refImages.length) {
                     replyTo = {
                         name: repliedToBot ? loadCard(cfg.sillytavern.characterPath).name
-                            : (ref.member?.displayName || ref.author?.username || '某人'),
+                            : userDisplayName(cfg, ref.author?.id, ref.member?.displayName || ref.author?.username || '某人'),
                         body: ref.content ? (repliedToBot ? stripComments(ref.content) : ref.content) : '[图片]',
                     };
                 }
@@ -194,21 +194,20 @@ client.on('messageCreate', async (message) => {
         const content = stripMentions(message.content, client.user?.id);
         // 被引用消息的图不单独算输入
         const hasInput = Boolean(content) || eligible.length > 0;
+        if (!hasInput) return;
 
         if (verdict.act === 'reply') {
             // 正常触发的一轮把节奏清零，重新从头数
-            cadence.reset(message.channelId);
-        } else if (!verdict.cadence || !hasInput || !cadence.bump(message.channelId, message.guildId)) {
+            cadence.reset(message.channelId, message.author.id);
+        } else if (!verdict.cadence || !cadence.bump(message.channelId, message.author.id)) {
             // 既无正文也无图片的消息发不出回复，不能让它白吃一格计数
             return;
         }
 
-        if (!hasInput) return;
-
         const scope = scopeOf(message);
         const images = await downloadImages([...eligible, ...refImages], { scope, dataDir: cfg.chat.dataDir, proxy: cfg.discord.proxy });
         if (!content && !images.length) {
-            if (verdict.act !== 'reply') cadence.refund(message.channelId, message.guildId);
+            if (verdict.act !== 'reply') cadence.refund(message.channelId, message.author.id);
             log.warn('图片全部下载失败且无正文，跳过', { id: message.id });
             return;
         }
@@ -216,7 +215,10 @@ client.on('messageCreate', async (message) => {
         sessions.enqueue(scope, {
             id: message.id,
             content,
-            authorName: message.member?.displayName || message.author.username,
+            authorId: message.author.id,
+            authorName: userDisplayName(cfg, message.author.id, message.member?.displayName || message.author.username),
+            fallbackAuthorName: message.member?.displayName || message.author.username,
+            trigger: verdict.trigger || 'cadence',
             channel: message.channel,
             replyTo,
             ...(images.length ? { images } : {}),
