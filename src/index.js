@@ -11,7 +11,7 @@ import { Cadence } from './discord/cadence.js';
 import { startTyping } from './discord/typing.js';
 import { sendText } from './discord/send.js';
 import { reactToTrigger } from './discord/reaction.js';
-import { buildCommandData, handleClear } from './discord/commands.js';
+import { buildCommandData, handleClear, buildModelCommandData, handleModel, MODEL_COMMAND_NAME } from './discord/commands.js';
 import { buildToolCommandData, handleToolCommand, TOOL_COMMANDS } from './discord/tools.js';
 import { Scheduler } from './discord/schedule.js';
 import { createDirectoryRefresher } from './discord/directory.js';
@@ -114,9 +114,10 @@ client.once('clientReady', async (c) => {
     for (const [id, g] of c.guilds.cache) log.info(`  所在服务器：${g.name} (${id})`);
     try {
         const clear = buildCommandData(djs, cfg.discord.clearCommandName || 'clear');
+        const model = buildModelCommandData(djs);
         const tools = buildToolCommandData(djs);
-        await c.application.commands.set([clear, ...tools]);
-        log.info(`命令已注册：/${clear.name}, ${tools.map((t) => t.name).join(', ')}`);
+        await c.application.commands.set([clear, model, ...tools]);
+        log.info(`命令已注册：/${clear.name}, /${model.name}, ${tools.map((t) => t.name).join(', ')}`);
     } catch (e) {
         log.error('斜杠命令注册失败', { err: e?.message });
     }
@@ -138,11 +139,14 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
     if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName !== (cfg.discord.clearCommandName || 'clear')) return;
     try {
-        await handleClear(interaction, { cfg, store, ambient, cadence, scopeOf });
+        if (interaction.commandName === (cfg.discord.clearCommandName || 'clear')) {
+            await handleClear(interaction, { cfg, store, ambient, cadence, scopeOf });
+        } else if (interaction.commandName === MODEL_COMMAND_NAME) {
+            await handleModel(interaction, { cfg, djs });
+        }
     } catch (e) {
-        log.error('清空命令失败', { err: e?.message });
+        log.error('斜杠命令失败', { name: interaction.commandName, err: e?.message });
     }
 });
 

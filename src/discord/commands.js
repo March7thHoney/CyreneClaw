@@ -1,5 +1,9 @@
-// 斜杠命令：按用户的指令权限清空当前频道上下文。
+// 斜杠命令：/clear 清空当前频道上下文，/model 查看当前接口与模型（结果公开），都按用户的指令权限执行。
 import { userRule } from './users.js';
+
+export const MODEL_COMMAND_NAME = 'model';
+const NO_MENTIONS = { parse: [] };
+
 export function buildCommandData(djs, name) {
     const { SlashCommandBuilder, InteractionContextType } = djs;
     return new SlashCommandBuilder()
@@ -32,4 +36,29 @@ export async function handleClear(interaction, { cfg, store, ambient, cadence, s
         ephemeral: true,
     });
     return { scope, archived };
+}
+
+export function buildModelCommandData(djs) {
+    const { SlashCommandBuilder, InteractionContextType } = djs;
+    return new SlashCommandBuilder()
+        .setName(MODEL_COMMAND_NAME)
+        .setDescription('查看当前使用的接口与模型')
+        .setContexts(
+            InteractionContextType.Guild,
+            InteractionContextType.BotDM,
+            InteractionContextType.PrivateChannel,
+        )
+        .toJSON();
+}
+
+// cfg.llm 由热更新就地覆盖，交互时读到的就是控制台切换后的当前值
+export async function handleModel(interaction, { cfg, djs }) {
+    const { MessageFlags } = djs;
+    if (!userRule(cfg, interaction.user.id)?.commandsEnabled) {
+        await interaction.reply({ content: cfg.discord.replies.notOwner, flags: MessageFlags.Ephemeral, allowedMentions: NO_MENTIONS });
+        return;
+    }
+    const content = `接口：${cfg.llm.active ?? '默认'}\n模型：${cfg.llm.model}`;
+    await interaction.reply({ content, allowedMentions: NO_MENTIONS });
+    return { active: cfg.llm.active, model: cfg.llm.model };
 }

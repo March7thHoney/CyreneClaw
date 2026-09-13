@@ -45,7 +45,7 @@ cp config.example.json config.json
 | `discord.users[].dmEnabled` | 允许直接私聊 |
 | `discord.users[].mentionEnabled` | 允许通过群聊 @ 或回复昔涟触发 |
 | `discord.users[].cadenceEnabled` / `replyEveryN` | 自动回复开关及 N 值（1–1000），按用户和频道独立计数 |
-| `discord.users[].commandsEnabled` | 允许使用 `/clear`、Explain、Translate |
+| `discord.users[].commandsEnabled` | 允许使用 `/clear`、`/model`、Explain、Translate |
 | `discord.guilds` | 允许的服务器；`channels` 指定频道列表，空值表示全部频道 |
 | `discord.images.enabled` | 图片输入总开关 |
 | `discord.images.maxPerMessage` | 单条消息最多读取的图片数，默认 4 |
@@ -181,6 +181,7 @@ Discord 连不上时本机聊天照常可用。
 | 服务器频道（节奏） | 用户开启自动回复，个人消息满 `replyEveryN` 条时触发（默认 10） |
 | 纯图片消息 | 与文字消息相同，以上三种场景均可触发 |
 | 清空当前频道记忆 | 斜杠命令 `/clear`（旧记录归档保留） |
+| 查看当前接口与模型 | 斜杠命令 `/model`，显示 `llm.active` 与对应模型名，所有人可见 |
 | 解释一条消息 | 右键消息 → APP → `Explain`，用简体中文说明这条消息说了什么，支持图片 |
 | 翻译一条消息 | 右键消息 → APP → `Translate`，外语译成简体中文，中文译成英文，支持图片 |
 
@@ -191,7 +192,8 @@ Discord 连不上时本机聊天照常可用。
 第 N 条就是这轮的输入，之前被跳过的话和其他人的发言已经在现场氛围里。
 每位用户的阈值由其 `discord.users[].replyEveryN` 设置，适用于允许的全部服务器。
 
-`/clear`、`Explain` 与 `Translate` 由每位用户的 Discord 指令开关统一控制，结果仅自己可见。
+`/clear`、`/model`、`Explain` 与 `Translate` 由每位用户的 Discord 指令开关统一控制。
+`/model` 的结果频道内所有人可见，其余命令的结果仅自己可见。
 `Explain` 与 `Translate` 使用各自独立的系统提示词，
 只读取目标消息本身的文字与图片附件，结果不写入聊天记录。
 图片落盘到 `chat.dataDir/images/tools/<用户ID>/`，张数、大小与保留天数沿用 `discord.images`。
