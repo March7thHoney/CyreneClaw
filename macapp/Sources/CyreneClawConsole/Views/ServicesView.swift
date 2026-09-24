@@ -61,10 +61,12 @@ struct ServicesView: View {
         .padding(.horizontal, 6)
     }
 
+    // 模型名取机器人实际请求的那个；生效接口不是 bridge 时只报队列
     private var bridgeDetail: String? {
-        guard let m = model.bridgeModel else { return nil }
-        guard let q = model.bridgeQueue else { return m }
-        return "\(m) · 队列 \(q)"
+        guard let q = model.bridgeQueue else { return nil }
+        let c = model.config
+        guard c.bridgeProfile == c.llmActive, !c.model.isEmpty else { return "队列 \(q)" }
+        return "\(c.model) · 队列 \(q)"
     }
 
     private func dependency(_ name: String, _ state: ServiceState, _ detail: String?) -> some View {

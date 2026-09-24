@@ -113,6 +113,8 @@ struct ConsoleConfig {
 
     // 探活与清单文件用，不开放编辑
     var bridgeOrigin = "http://127.0.0.1:5599"
+    // 指向本地 bridge 的接口名，生效接口是它时状态条才挂模型名
+    var bridgeProfile: String?
     var voiceEndpoint = "http://127.0.0.1:9880"
     var localChatOrigin = "http://127.0.0.1:5610"
     var dataDir: URL?
@@ -231,6 +233,7 @@ enum ConfigStore {
         }
         // bridge 卡片只盯本地 bridge：优先名为 bridge 的接口，其次第一个回环地址
         let bridgeProfile = c.profiles.first(where: { $0.name == "bridge" }) ?? c.profiles.first(where: { $0.isLoopback })
+        c.bridgeProfile = bridgeProfile?.name
         if let base = bridgeProfile?.baseUrl, let origin = origin(of: base) {
             c.bridgeOrigin = origin
         }

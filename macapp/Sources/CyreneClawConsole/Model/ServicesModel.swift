@@ -14,7 +14,6 @@ final class ServicesModel: ObservableObject {
 
     @Published var bridge = ServiceState.unknown
     @Published var bridgePid: Int32?
-    @Published var bridgeModel: String?
     @Published var bridgeQueue: String?
 
     @Published var voice = ServiceState.unknown
@@ -99,14 +98,13 @@ final class ServicesModel: ObservableObject {
         let br = await bridgeStatus
         bridge = map(br)
         bridgePid = br.pid
+        // /health 的 model 是 bridge 兜底默认值，不代表机器人实际请求的模型，只取队列
         if let h = await health {
-            bridgeModel = h["model"] as? String
             let running = h["running"] as? Int ?? 0
             let queued = h["queued"] as? Int ?? 0
             bridgeQueue = "\(running) / \(queued)"
             if br.kind == .unknown { bridge = .running }
         } else {
-            bridgeModel = nil
             bridgeQueue = nil
         }
 
